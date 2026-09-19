@@ -1,17 +1,149 @@
+export interface DetailedExperience {
+  id: string;
+  role: string;
+  company: string;
+  location?: string;
+  contractType?: string; // Stage, Alternance, CDI, CDD, Bénévolat, etc.
+  startDate?: string;
+  endDate?: string;
+  isCurrent?: boolean;
+  period?: string;
+  description: string;
+  missions?: string[];
+  responsibilities?: string[];
+  achievements?: string[];
+  kpis?: string[];
+  skills?: string[];
+  tools?: string[];
+  sector?: string;
+  context?: string;
+  source?: "cv" | "linkedin" | "profile" | "cv+linkedin";
+}
+
+export interface DetailedEducation {
+  id: string;
+  institution?: string;
+  school?: string;
+  degree: string;
+  fieldOfStudy?: string;
+  domain?: string;
+  location?: string;
+  startDate?: string;
+  endDate?: string;
+  period?: string;
+  isCurrent?: boolean;
+  status?: string;
+  description?: string;
+}
+
+export interface HardSkillItem {
+  id?: string;
+  name: string;
+  level: "Débutant" | "Intermédiaire" | "Avancé" | "Expert";
+  category?: string;
+}
+
+export interface LanguageItem {
+  id?: string;
+  language: string;
+  level: string; // e.g. "B2", "Langue maternelle", "C1"
+  cefrLevel?: string;
+  certification?: string;
+  score?: string;
+}
+
+export interface CertificationItem {
+  id?: string;
+  name: string;
+  title?: string;
+  issuer?: string;
+  organization?: string;
+  date?: string;
+  issueDate?: string;
+  score?: string;
+  maxScore?: string;
+  level?: string;
+  credentialId?: string;
+  licenseId?: string;
+  verificationUrl?: string;
+  source?: "cv" | "linkedin" | "profile" | "cv+linkedin";
+}
+
+export interface ProjectItem {
+  id?: string;
+  name: string;
+  title?: string;
+  description?: string;
+  role?: string;
+  date?: string;
+  url?: string;
+  technologies?: string[];
+  results?: string;
+}
+
+export interface VolunteerItem {
+  id?: string;
+  organization: string;
+  role?: string;
+  date?: string;
+  dates?: string;
+  description?: string;
+  achievements?: string;
+}
+
 export interface CandidateProfile {
   id: string;
+  firstName?: string;
+  lastName?: string;
   fullName: string;
   email: string;
   phone: string;
-  currentSituation: string; // e.g., "Étudiant en 3e année de B.U.T. Techniques de Commercialisation à l'IUT Clermont Auvergne, campus de Montluçon"
-  currentAlternance: string; // e.g., "Crédit Agricole de Commentry"
-  targetMasters: string[]; // e.g., ["Finance", "Fintech", "Gestion de patrimoine"]
+  title?: string;
+  avatarUrl?: string;
+  driverLicense?: string;
+  city?: string;
+  country?: string;
+  mobility?: string;
+  linkedInUrl?: string;
+  portfolioUrl?: string;
+  githubUrl?: string;
+
+  currentSituation: string;
+  currentAlternance: string;
+  bio: string;
+
+  // Objectifs & Préférences
+  targetTitles?: string[];
+  targetSectors?: string[];
+  targetCompanies?: string[];
+  contractTypes?: string[];
+  startDateTarget?: string;
+  durationTarget?: string;
+  minSalary?: string;
+  workMode?: "hybride" | "remote" | "presentiel" | "indifferent";
+  idealPositionSearch?: string;
+  avoidSectors?: string[];
+  redFlags?: string[];
+
+  // Collections
+  experiences: DetailedExperience[];
+  educations?: DetailedEducation[];
+  hardSkills?: HardSkillItem[];
+  toolsAndSoftware?: string[];
+  softSkills?: string[];
+  languagesList?: LanguageItem[];
+  certificationsList?: CertificationItem[];
+  projectsList?: ProjectItem[];
+  volunteerWork?: VolunteerItem[];
+  interests?: string[];
+
+  // Legacy compatibility fields
   skills: string[];
+  targetMasters: string[];
   languages: string[];
   certifications: string[];
   projects: Array<{ id: string; title: string; description: string }>;
-  experiences: Array<{ id: string; role: string; company: string; period: string; description: string }>;
-  bio: string;
+
   profileCompletionScore: number; // 0 - 100
 }
 

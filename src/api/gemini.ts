@@ -5,9 +5,9 @@ import { ExtractedJobInfo, CandidateProfile, ContactCategory } from "../types.ts
 let aiClient: GoogleGenAI | null = null;
 
 export const CASCADE_MODELS = [
-  "gemini-3.8-flash",
   "gemini-3.1-flash-lite",
-  "gemini-flash-latest"
+  "gemini-flash-latest",
+  "gemini-3.8-flash"
 ];
 
 function getAi(): GoogleGenAI {
@@ -845,3 +845,162 @@ Directives de réponse :
     return generatePersonaFallback(personaId, lastUserMsg, candidateProfile, activeFocus);
   }
 }
+
+/**
+ * Lit et extrait les informations d'un CV (et éventuellement d'un profil LinkedIn) sous forme de données structurées JSON
+ */
+export async function parseCV(cvText: string, linkedinText?: string): Promise<any> {
+  try {
+    const ai = getAi();
+    const isMultiSource = Boolean(linkedinText && linkedinText.trim().length > 10);
+    
+    const prompt = `
+Tu es un expert mondial en extraction ATS, vérification de CV et structuration de profils professionnels haut de gamme.
+${isMultiSource ? "Tu disposes de deux sources d'informations : 1) Le CV principal, 2) Le profil / export LinkedIn." : "Analyse le texte du CV ci-dessous."}
+Extrait TOUTES les informations réelles sans omission sous la forme d'un objet JSON strict respectant la structure ci-dessous.
+
+RÈGLES ABSOLUES ET CONSIGNES DE FIDÉLITÉ :
+1. NE JAMAIS RÉSUMER NI COMPRESSER LES MISSIONS : Si une expérience contient 8 bullet points ou missions dans le document source, conserve les 8 éléments distincts dans le tableau "missions". Ne transforme JAMAIS plusieurs missions en une seule phrase générique.
+2. SÉPARATION MISSIONS vs RÉALISATIONS / KPI :
+   - "missions" : les tâches et responsabilités régulières.
+   - "achievements" et "kpis" : les résultats concrets, chiffres, pourcentages, volumes, montants (€), nombres de clients, objectifs atteints. N'invente JAMAIS un chiffre.
+3. DÉTECTION EXHAUSTIVE DES CERTIFICATIONS ET TESTS STANDARDISÉS :
+   - Recherche les certifications dans TOUT le document (y compris dans les rubriques Langues, Formations, En-tête, Résumé, Compétences).
+   - Détecte obligatoirement tous les tests et examens officiels : TOEIC, TAGE MAGE, TOEFL, IELTS, Cambridge, AMF, CFA, GMAT, GRE, Linguaskill, Google Analytics, etc.
+   - Pour le TOEIC (ex: "Anglais B2 - TOEIC 745/990") : Renseigne à la fois l'objet dans "languages" ET un objet complet dans "certifications" avec name: "TOEIC", score: "745/990", maxScore: "990".
+   - Pour le TAGE MAGE (ex: "TAGE MAGE 337/600") : Crée une certification avec name: "TAGE MAGE", score: "337/600", maxScore: "600".
+4. FIDÉLITÉ ET NON-HALLUCINATION : N'invente AUCUNE information absente. Si un champ n'est pas mentionné, laisse "" ou [].
+${isMultiSource ? "5. CONFLITS & SOURCES : Compare le CV et LinkedIn. Indique la source principale pour chaque élément ('cv', 'linkedin', ou 'combined'). Si une date ou un poste diffère entre le CV et LinkedIn, note le conflit dans un champ 'conflictNote'." : ""}
+
+FORMAT JSON ATTENDU STRICT :
+{
+  "parsed": {
+    "identity": {
+      "firstName": "Prénom du candidat",
+      "lastName": "Nom du candidat",
+      "fullName": "Prénom Nom",
+      "email": "Email",
+      "phone": "Téléphone",
+      "title": "Titre professionnel principal",
+      "bio": "Synthèse ou résumé du profil",
+      "city": "Ville",
+      "country": "Pays",
+      "linkedInUrl": "Lien LinkedIn",
+      "githubUrl": "Lien GitHub",
+      "portfolioUrl": "Lien portfolio / site web"
+    },
+    "experiences": [
+      {
+        "role": "Intitulé exact du poste",
+        "company": "Nom de l'entreprise",
+        "location": "Ville, Pays",
+        "contractType": "CDI | CDD | Alternance | Stage | Bénévolat | Autre",
+        "startDate": "YYYY-MM ou YYYY",
+        "endDate": "YYYY-MM ou YYYY ou vide",
+        "isCurrent": false,
+        "description": "Description générale ou paragraphe de présentation de l'expérience",
+        "missions": ["Mission détaillée 1", "Mission détaillée 2", "Mission détaillée 3"],
+        "responsibilities": ["Responsabilité principale 1", ...],
+        "achievements": ["Réalisation concrète 1", ...],
+        "kpis": ["Chiffre clé ou résultat mesurable 1 (ex: 40 appels/jour, 15 RDV)", ...],
+        "skills": ["Compétence mobilisée 1", ...],
+        "tools": ["Outil / logiciel utilisé 1", ...],
+        "sector": "Secteur d'activité",
+        "context": "Contexte de l'équipe ou du service",
+        "source": "cv"
+      }
+    ],
+    "educations": [
+      {
+        "school": "Nom de l'établissement / Université / École",
+        "degree": "Intitulé du diplôme ou titre obtenu",
+        "domain": "Domaine d'études ou spécialité",
+        "location": "Ville, Pays",
+        "startDate": "YYYY",
+        "endDate": "YYYY",
+        "isCurrent": false,
+        "description": "Détails sur les options, projets académiques ou mentions"
+      }
+    ],
+    "hardSkills": [
+      {
+        "name": "Nom de la compétence",
+        "level": "Débutant" | "Intermédiaire" | "Avancé" | "Expert",
+        "category": "Commercial" | "Finance" | "Gestion" | "Marketing" | "Technique" | "Général"
+      }
+    ],
+    "toolsAndSoftware": ["Microsoft Excel", "Salesforce CRM", "Canva", ...],
+    "softSkills": ["Rigueur", "Esprit d'équipe", "Aisance relationnelle", ...],
+    "languages": [
+      {
+        "language": "Nom de la langue",
+        "level": "B2",
+        "certification": "TOEIC Listening & Reading",
+        "score": "745/990"
+      }
+    ],
+    "certifications": [
+      {
+        "name": "Intitulé de la certification ou du test (ex: TOEIC, TAGE MAGE, AMF)",
+        "issuer": "Organisme émetteur (ex: ETS Global, FNEGE, AMF)",
+        "date": "YYYY",
+        "score": "Score obtenu (ex: 745/990, 337/600)",
+        "maxScore": "Score maximum (ex: 990, 600)",
+        "level": "Niveau (ex: B2, Avancé)",
+        "credentialId": "Identifiant du certificat",
+        "verificationUrl": "URL de vérification si présente"
+      }
+    ],
+    "projects": [
+      {
+        "name": "Nom du projet",
+        "description": "Description du projet",
+        "role": "Rôle dans le projet",
+        "date": "YYYY",
+        "technologies": ["Outil 1", "Outil 2"],
+        "results": "Résultats ou note obtenue"
+      }
+    ],
+    "volunteerWork": [
+      {
+        "organization": "Nom de l'association",
+        "role": "Rôle / Responsabilité",
+        "dates": "YYYY - YYYY",
+        "description": "Missions bénévoles accomplies",
+        "achievements": "Réalisations marquantes"
+      }
+    ],
+    "interests": ["Centre d'intérêt 1", ...]
+  }
+}
+
+${isMultiSource ? `Source 1 - CV :\n${cvText}\n\nSource 2 - LinkedIn :\n${linkedinText}` : `Texte du CV :\n${cvText}`}
+`;
+
+    for (const model of CASCADE_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
+
+        const text = response.text || "{}";
+        const json = JSON.parse(text);
+        if (json && json.parsed) {
+          return json;
+        }
+      } catch (err: any) {
+        console.warn(`[parseCV] Échec du modèle ${model}, tentative suivante...`, err?.message);
+      }
+    }
+
+    return { parsed: null };
+  } catch (err) {
+    console.error("[parseCV] Erreur d'analyse:", err);
+    return { parsed: null };
+  }
+}
+

@@ -919,13 +919,13 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
                 Analyse & Structuration de l'offre...
               </h4>
               <p className="text-xs text-slate-400 mt-1 max-w-md">
-                Interrogation du modèle Gemini 3.8 Flash avec application du schéma strict et garde-fous déterministes.
+                Interrogation des modèles Gemini avec application du schéma strict et garde-fous déterministes.
               </p>
             </div>
 
             <div className="flex items-center gap-2 text-[11px] text-slate-400 bg-white/[0.02] px-3 py-1.5 rounded-full border border-white/5">
               <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
-              <span>Cascade : gemini-3.8-flash &rarr; flash-latest &rarr; 3.1-flash-lite &rarr; heuristique local</span>
+              <span>Cascade : 3.1-flash-lite &rarr; flash-latest &rarr; 3.8-flash &rarr; heuristique local</span>
             </div>
           </div>
         )}

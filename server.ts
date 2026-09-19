@@ -7,7 +7,8 @@ import {
   extractJobDetails, 
   analyzeLinkedInContacts, 
   generateOutreachMessage, 
-  handlePersonaChat 
+  handlePersonaChat,
+  parseCV
 } from "./src/api/gemini.ts";
 import { extractJobOfferWithCascade } from "./src/api/jobExtractor.ts";
 
@@ -183,6 +184,8 @@ async function startServer() {
         case "extractJobOffer":
           // Nouvelle extraction haute précision avec cascade de modèles et fallback
           return res.json(await extractJobOfferWithCascade(payload.jobDescription, payload.sourceUrl));
+        case "parseCV":
+          return res.json(await parseCV(payload.cvText, payload.linkedinText));
         case "extractJobDetails":
           return res.json(await extractJobDetails(payload.jobDescription));
         case "analyzeLinkedIn":
