@@ -71,6 +71,7 @@ interface OpportunitiesProps {
 export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchTerm }) => {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
+  const [oppToDelete, setOppToDelete] = useState<Opportunity | null>(null);
   const [activeTab, setActiveTab] = useState<"offre" | "profil" | "entreprise" | "workflow">("offre");
   
   // Modals visibility
@@ -495,19 +496,6 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
 
         {/* Action buttons on single horizontal row */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 lg:pb-0 scrollbar-none shrink-0 flex-nowrap">
-          <GlassButton
-            variant="ghost"
-            size="md"
-            onClick={() => {
-              dbStore.resetOpportunities();
-              showToast("8 opportunités factices réinitialisées sur les 4 colonnes", "info");
-            }}
-            title="Réinitialiser les cartes factices de démonstration"
-            icon={<RotateCcw className="w-3.5 h-3.5 text-[#9AA0B2]" />}
-          >
-            Réinitialiser démo
-          </GlassButton>
-
           <GlassButton 
             variant="secondary" 
             size="md"
@@ -686,12 +674,23 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                           isBeingDragged ? "opacity-40 scale-95 border-dashed border-white/40" : ""
                         }`}
                       >
-                        {/* 1. Entreprise */}
+                        {/* 1. Entreprise & Action */}
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-[#FF6685] tracking-wide font-display truncate flex items-center gap-1.5">
                             <Building2 className="w-3.5 h-3.5 shrink-0 text-[#FF6685]" />
                             <span className="truncate">{opp.companyName}</span>
                           </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOppToDelete(opp);
+                            }}
+                            className="p-1 rounded-lg text-[#9AA0B2] hover:text-[#F04438] hover:bg-red-500/10 transition-colors cursor-pointer"
+                            title="Supprimer cette opportunité"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
 
                         {/* 2. Intitulé du poste */}
@@ -2099,11 +2098,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
             <div className="flex flex-wrap items-center justify-between gap-4 pt-5 border-t border-white/10">
               {/* Bottom Left: Supprimer l'opportunité */}
               <button
-                onClick={() => {
-                  if (window.confirm(`Es-tu certain de vouloir supprimer définitivement l'offre "${selectedOpp.title}" chez ${selectedOpp.companyName} ?`)) {
-                    handleDeleteOpp(selectedOpp.id);
-                  }
-                }}
+                onClick={() => setOppToDelete(selectedOpp)}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 border border-rose-500/20 text-xs font-semibold transition-colors cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -2159,6 +2154,42 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
           }
         }}
       />
+
+      {/* Delete Opportunity Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(oppToDelete)}
+        onClose={() => setOppToDelete(null)}
+        title="Supprimer l'opportunité"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-200 leading-relaxed">
+            Êtes-vous sûr de vouloir supprimer définitivement l'offre <strong className="text-white font-bold">{oppToDelete?.title}</strong> chez {oppToDelete?.companyName} ?
+            Cette action est irréversible.
+          </div>
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <GlassButton
+              variant="ghost"
+              size="sm"
+              onClick={() => setOppToDelete(null)}
+            >
+              Annuler
+            </GlassButton>
+            <GlassButton
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                if (oppToDelete) {
+                  handleDeleteOpp(oppToDelete.id);
+                  setOppToDelete(null);
+                }
+              }}
+            >
+              Confirmer la suppression
+            </GlassButton>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

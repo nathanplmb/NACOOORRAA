@@ -190,7 +190,8 @@ async function startServer() {
         case "outreachMessage":
           return res.json({ message: await generateOutreachMessage(
             payload.contactName, payload.contactJob, payload.contactCompany, 
-            payload.connectionPoints || [], payload.profile, payload.opportunityTitle
+            payload.connectionPoints || [], payload.profile, payload.opportunityTitle,
+            payload.format
           )});
         case "chat":
           return res.json({ response: await handlePersonaChat(payload.personaId, payload.messages, payload.profile) });

@@ -118,7 +118,88 @@ export async function extractJobDetails(jobDescription: string): Promise<Extract
 }
 
 /**
- * Normalizes a list of imported LinkedIn contacts.
+ * Heuristic classifier fallback when Gemini API is unavailable or rate limited.
+ */
+function analyzeWithHeuristics(
+  rawContacts: Array<{ fullName: string; jobTitle: string; companyName: string }>,
+  candidateProfile: CandidateProfile
+) {
+  const profileSchool = (candidateProfile.currentSituation || "").toLowerCase();
+  const currentCompany = (candidateProfile.currentAlternance || "").toLowerCase();
+
+  return rawContacts.map(c => {
+    const job = (c.jobTitle || "").toLowerCase();
+    const comp = (c.companyName || "").toLowerCase();
+    const name = c.fullName || "Contact";
+
+    let category: ContactCategory = "other";
+    let relevanceScore = 45;
+    const connectionPoints: string[] = [];
+    let normalizedJobTitle = c.jobTitle || "Professionnel";
+
+    // 1. Recruiter detection
+    const isRecruiter = /recrut|talent|rh\b|drh|ressources humaines|headhunter|chasseur|campus manager|people|human resources/i.test(job);
+    if (isRecruiter) {
+      category = "recruiter";
+      relevanceScore = 88;
+      connectionPoints.push("Recruteur RH / Talent Acquisition");
+      normalizedJobTitle = c.jobTitle.replace(/^(chargé de|responsable|directeur)\s+/i, (m) => m).trim();
+    }
+
+    // 2. Alumni detection (based on university / institute keywords)
+    const isAlumni = (/iut|clermont|montluçon|uca|iae|polytech|auvergne/i.test(job) || /iut|clermont|montluçon|uca|auvergne/i.test(comp)) && 
+                     (profileSchool.includes("iut") || profileSchool.includes("clermont") || profileSchool.includes("montluçon") || profileSchool.includes("uca"));
+    if (isAlumni) {
+      category = "alumni";
+      relevanceScore = Math.max(relevanceScore, 95);
+      connectionPoints.unshift("Réseau Alumni / Même établissement");
+    }
+
+    // 3. Sector pro detection (finance, banking, wealth management, fintech, insurance, audit)
+    const isSectorPro = /patrimoine|wealth|banqu|financ|fintech|invest|credit|crédit|assurance|asset|portfolio|trading|analyste|cgp|gestion privée|auditeur|risk|conformité|m&a|private equity/i.test(job) ||
+                        /crédit agricole|lcl|bnp|société générale|axa|palatine|bpifrance|luko|payplug|boursorama|revolut|bpce|caisse d'epargne|banque populaire|cic|rothschild|natixis/i.test(comp);
+    if (isSectorPro && category === "other") {
+      category = "sector_pro";
+      relevanceScore = 82;
+      connectionPoints.push("Professionnel du secteur cible (Banque / Finance / Patrimoine)");
+    }
+
+    // 4. Student / Intern detection
+    const isStudent = /étudiant|etudiant|student|alternan|stagiaire|intern\b|apprenti|master\s*\d|but\s*tc|licence/i.test(job);
+    if (isStudent && category === "other") {
+      category = "student";
+      relevanceScore = 65;
+      connectionPoints.push("Étudiant / En recherche de parcours");
+    } else if (category === "other" && job.length > 2) {
+      category = "other_pro";
+      relevanceScore = 52;
+      connectionPoints.push("Contact réseau professionnel");
+    }
+
+    // Bonus score if in same company as target or current alternance
+    if (currentCompany && currentCompany.length > 2 && comp.includes(currentCompany.substring(0, 8))) {
+      relevanceScore = Math.min(100, relevanceScore + 12);
+      connectionPoints.push(`Même groupe : ${c.companyName}`);
+    }
+
+    if (connectionPoints.length === 0) {
+      connectionPoints.push("Contact importé LinkedIn");
+    }
+
+    return {
+      fullName: name,
+      normalizedJobTitle: normalizedJobTitle || c.jobTitle || "Professionnel",
+      category,
+      relevanceScore,
+      connectionPoints,
+      academicPath: isAlumni ? "IUT Clermont Auvergne" : "",
+      previousCompanies: []
+    };
+  });
+}
+
+/**
+ * Normalizes a list of imported LinkedIn contacts with model cascade and heuristic fallback.
  * Input: Raw contact details (fullName, jobTitle, companyName)
  * Output: Enrichment, categorization, and relevance scoring relative to the candidate's profile.
  */
@@ -134,74 +215,152 @@ export async function analyzeLinkedInContacts(
   academicPath: string;
   previousCompanies: string[];
 }>> {
-  try {
-    const ai = getAi();
-    const prompt = `
-      Tu es l'intelligence artificielle de NACORA, un accélérateur de carrière.
-      Analyse les contacts importés ci-dessous et catégorise-les par rapport au profil du candidat.
-      
-      Profil du Candidat :
-      - Nom : ${candidateProfile.fullName}
-      - Situation : ${candidateProfile.currentSituation}
-      - Alternance actuelle : ${candidateProfile.currentAlternance}
-      - Masters ciblés : ${candidateProfile.targetMasters.join(", ")}
-      - Compétences clés : ${candidateProfile.skills.join(", ")}
+  if (!rawContacts || rawContacts.length === 0) return [];
 
-      Pour chaque contact, tu dois :
-      1. Normaliser le titre du poste (ex: "Wealth Manager" -> "Conseiller en Gestion de Patrimoine").
-      2. Le classer dans l'une des catégories suivantes :
-         - "recruiter" (Recruteur, DRH, Talent Acquisition)
-         - "alumni" (S'il a étudié au même endroit que le candidat : ${candidateProfile.currentSituation || "même filière/établissement"})
-         - "student" (Étudiant actuellement en recherche ou dans la même filière)
-         - "sector_pro" (Professionnel exerçant dans le secteur cible du candidat : ${candidateProfile.targetMasters.join(", ") || "Finance / Banque"})
-         - "other_pro" (Professionnel d'un autre secteur)
-         - "other" (Autre profil)
-      3. Calculer un score de pertinence pondéré de 0 à 100 basé sur les facteurs : même établissement (Alumni = +35 pts), entreprise cible (${candidateProfile.currentAlternance || "secteur financier"} = +25 pts), catégorie recruteur = +30 pts, secteur d'activité concordant = +20 pts.
-      4. Détecter des points de connexion réels à afficher (ex: "Même formation", "Travaille dans le secteur cible"). Ne rien inventer.
-      5. Fournir un parcours académique abrégé plausible ou vide si non détectable.
-      6. Extraire les entreprises précédentes listées (ou laisser vide si inconnu).
-
-      Format JSON attendu :
-      [
-        {
-          "fullName": "Nom du contact",
-          "normalizedJobTitle": "Poste normalisé",
-          "category": "recruiter | alumni | student | sector_pro | other_pro | other",
-          "relevanceScore": 85,
-          "connectionPoints": ["Point de connexion 1", ...],
-          "academicPath": "IUT Clermont Auvergne",
-          "previousCompanies": ["Entreprise A"]
-        },
-        ...
-      ]
-
-      Liste des contacts bruts à analyser :
-      ${JSON.stringify(rawContacts)}
-    `;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
-
-    const text = response.text || "[]";
-    return JSON.parse(text);
-  } catch (error) {
-    console.error("Error in analyzeLinkedInContacts:", error);
-    // Safe fallbacks
-    return rawContacts.map(c => ({
-      fullName: c.fullName,
-      normalizedJobTitle: c.jobTitle || "Professionnel",
-      category: "other" as ContactCategory,
-      relevanceScore: 50,
-      connectionPoints: ["Importé via LinkedIn"],
-      academicPath: "Inconnu",
-      previousCompanies: []
-    }));
+  const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+  if (!key) {
+    return analyzeWithHeuristics(rawContacts, candidateProfile);
   }
+
+  const prompt = `
+    Tu es l'intelligence artificielle de NACORA, un accélérateur de carrière expert en finance, banque et fintech.
+    Analyse les contacts LinkedIn ci-dessous et catégorise-les avec une haute précision par rapport au profil du candidat.
+    
+    Profil du Candidat :
+    - Nom : ${candidateProfile.fullName || "Candidat"}
+    - Situation / Études : ${candidateProfile.currentSituation || "Étudiant en BUT TC à l'IUT Clermont Auvergne"}
+    - Alternance actuelle : ${candidateProfile.currentAlternance || "Banque"}
+    - Masters ciblés : ${(candidateProfile.targetMasters || []).join(", ") || "Finance / Gestion de patrimoine / Fintech"}
+    - Compétences clés : ${(candidateProfile.skills || []).join(", ")}
+
+    Règles de classification :
+    1. "recruiter" : Recruteur, RH, Talent Acquisition, Chargé de recrutement, Headhunter, DRH, People Lead.
+    2. "alumni" : Personne issue du même établissement ou réseau académique (${candidateProfile.currentSituation || "IUT / Université / IAE"}).
+    3. "student" : Étudiant, alternant, stagiaire ou apprenti.
+    4. "sector_pro" : Professionnel exerçant dans les métiers ou entreprises cibles (Banque, Gestion de patrimoine, Finance de marché, FinTech, Assurance, Private Equity).
+    5. "other_pro" : Professionnel d'un autre secteur d'activité (Industrie, Santé, Dev, etc.).
+    6. "other" : Autre profil.
+
+    Score de pertinence (0 à 100) :
+    - Alumni même école : 88-98
+    - Recruteur RH banque/finance : 85-95
+    - Pro secteur cible : 75-90
+    - Étudiant même filière : 60-75
+    - Pro autre secteur : 45-60
+
+    Points de connexion (connectionPoints) :
+    - Liste courte de 1 à 3 points concrets et valorisants (ex: "Alumni IUT Clermont Auvergne", "Recruteur RH chez Crédit Agricole", "Expertise Gestion de Patrimoine").
+
+    Format JSON attendu :
+    [
+      {
+        "fullName": "Nom exact",
+        "normalizedJobTitle": "Intitulé de poste professionnel clair",
+        "category": "recruiter | alumni | student | sector_pro | other_pro | other",
+        "relevanceScore": 90,
+        "connectionPoints": ["Point 1", "Point 2"],
+        "academicPath": "Parcours académique abrégé si identifiable",
+        "previousCompanies": []
+      }
+    ]
+
+    Contacts à analyser :
+    ${JSON.stringify(rawContacts)}
+  `;
+
+  const modelCascade = [
+    "gemini-3.8-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
+  ];
+
+  let ai: GoogleGenAI;
+  try {
+    ai = getAi();
+  } catch (e) {
+    return analyzeWithHeuristics(rawContacts, candidateProfile);
+  }
+
+  for (const modelName of modelCascade) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+        },
+      });
+
+      const text = response.text || "[]";
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // Ensure every contact is properly shaped
+        return rawContacts.map((c, idx) => {
+          const match = parsed[idx] || parsed.find(p => p.fullName === c.fullName);
+          if (match) {
+            return {
+              fullName: match.fullName || c.fullName,
+              normalizedJobTitle: match.normalizedJobTitle || c.jobTitle || "Professionnel",
+              category: (["recruiter", "alumni", "student", "sector_pro", "other_pro", "other"].includes(match.category) 
+                ? match.category 
+                : "other") as ContactCategory,
+              relevanceScore: typeof match.relevanceScore === "number" ? match.relevanceScore : 50,
+              connectionPoints: Array.isArray(match.connectionPoints) && match.connectionPoints.length > 0
+                ? match.connectionPoints 
+                : ["Contact importé LinkedIn"],
+              academicPath: match.academicPath || "",
+              previousCompanies: Array.isArray(match.previousCompanies) ? match.previousCompanies : []
+            };
+          }
+          return analyzeWithHeuristics([c], candidateProfile)[0];
+        });
+      }
+    } catch (modelErr: any) {
+      const errMsg = modelErr?.message || String(modelErr);
+      const isQuota = errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota exceeded");
+      if (isQuota) {
+        console.log(`[analyzeLinkedInContacts] Quota API atteint, bascule immédiate sur le moteur heuristique.`);
+        return analyzeWithHeuristics(rawContacts, candidateProfile);
+      }
+      console.warn(`[analyzeLinkedInContacts] Modèle ${modelName} indisponible, passage au suivant:`, errMsg);
+    }
+  }
+
+  // If all models failed, use deterministic heuristic engine
+  return analyzeWithHeuristics(rawContacts, candidateProfile);
+}
+
+const CASCADE_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-flash-latest"
+];
+
+/**
+ * Deterministic fallback generator when Gemini API is under high demand (503 / 429) or unavailable.
+ */
+function generateFallbackMessage(
+  contactName: string,
+  contactCompany: string,
+  contactJob: string,
+  point: string,
+  senderName: string,
+  format: 'invite' | 'inmail' | 'followup',
+  opportunityTitle?: string
+): string {
+  const firstName = contactName.split(" ")[0] || contactName;
+
+  if (format === 'invite') {
+    return `Bonjour ${firstName}, ayant un grand intérêt pour ${contactCompany || "vos activités"} (${point}), je serais ravi de vous rejoindre sur LinkedIn pour suivre vos actualités et échanger sur nos métiers. Bien cordialement, ${senderName}`;
+  }
+
+  if (format === 'followup') {
+    return `Bonjour ${firstName},\n\nJe me permets de vous relancer suite à ma démarche récente. Évoluant dans le secteur et préparant mes prochaines étapes professionnelles, j'aurais beaucoup apprécié recueillir votre retour d'expérience sur ${contactCompany}.\n\nRestant à votre entière disposition,\nBien cordialement,\n${senderName}`;
+  }
+
+  // inmail
+  return `Bonjour ${firstName},\n\nActuellement en parcours spécialisé et passionné par les enjeux de ${contactCompany}, je vous contacte car votre expérience en tant que ${contactJob} a tout particulièrement retenu mon attention (${point}).\n\n${opportunityTitle ? `Candidatant activement pour le poste de ${opportunityTitle}, ` : ""}Je serais très honoré de pouvoir échanger quelques minutes avec vous afin de bénéficier de vos précieux conseils sur les dynamiques du secteur.\n\nEn vous remerciant pour votre temps,\nBien cordialement,\n${senderName}`;
 }
 
 /**
@@ -213,12 +372,25 @@ export async function generateOutreachMessage(
   contactCompany: string,
   connectionPoints: string[],
   candidateProfile: CandidateProfile,
-  opportunityTitle?: string
+  opportunityTitle?: string,
+  format: 'invite' | 'inmail' | 'followup' = 'invite'
 ): Promise<string> {
+  const senderName = candidateProfile.fullName || "Nathan";
+  const pointsSummary = connectionPoints && connectionPoints.length > 0 ? connectionPoints[0] : "votre parcours inspirant";
+
   try {
     const ai = getAi();
+    const formatInstructions = format === 'invite'
+      ? 'Court message d\'invitation LinkedIn (STRICTEMENT MOINS DE 280 CARACTÈRES espace compris pour tenir dans la limite de note d\'invitation LinkedIn).'
+      : format === 'inmail'
+      ? 'Message d\'approche InMail ou Email personnalisé (environ 100 à 150 mots), structuré en 2-3 courts paragraphes.'
+      : 'Message de relance bienveillant et concis (environ 60 à 90 mots) faisant suite à un premier échange ou une candidature.';
+
     const prompt = `
-      Rédige un message d'approche LinkedIn personnalisé, court, professionnel et impactant (max 300 caractères pour respecter la limite d'invitation LinkedIn, ou max 600 caractères si avec option mail/inmail).
+      Tu es l'assistant de networking de NACORA.
+      Rédige un message d'approche professionnel en français pour contacter cette personne sur LinkedIn ou par email.
+
+      Format requis : ${formatInstructions}
       
       Destinataire :
       - Nom : ${contactName}
@@ -231,27 +403,35 @@ export async function generateOutreachMessage(
       - Situation : ${candidateProfile.currentSituation}
       - Alternance : ${candidateProfile.currentAlternance}
       - Objectif : Intégrer un master en ${candidateProfile.targetMasters.join(" / ")}
-      ${opportunityTitle ? `- Opportunité liée : Candidature en cours pour le poste de ${opportunityTitle}` : ""}
+      ${opportunityTitle ? `- Opportunité liée : Candidature pour ${opportunityTitle}` : ""}
 
       Consignes de style :
-      - Ton professionnel mais chaleureux, direct, poli.
-      - Utilise le vouvoiement.
-      - Ne fais pas de "pitch" trop agressif. Demande simplement un court échange de conseils sur son parcours ou sur l'entreprise.
-      - Fais un lien subtil et intelligent avec les points communs ou l'intérêt pour le secteur.
+      - Ton professionnel, respectueux, direct et poli (vouvoiement).
+      - Pas de pitch commercial agressif. Demande un court retour d'expérience ou échange de conseils.
+      - Valorise subtilement le point de connexion si présent.
 
-      Renvoie UNIQUEMENT le texte du message d'invitation, sans fioritures, sans commentaires additionnels.
+      Renvoie UNIQUEMENT le texte final du message sans aucun commentaire.
     `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-    });
+    for (const model of CASCADE_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+        });
 
-    return response.text?.trim() || "Bonjour, ravi de vous compter parmi mes contacts. Au plaisir d'échanger sur nos parcours respectifs.";
+        if (response && response.text) {
+          return response.text.trim();
+        }
+      } catch (err: any) {
+        console.warn(`[generateOutreachMessage] Model ${model} failed, trying cascade:`, err?.message || err);
+      }
+    }
+
+    return generateFallbackMessage(contactName, contactCompany, contactJob, pointsSummary, senderName, format, opportunityTitle);
   } catch (error) {
-    console.error("Error in generateOutreachMessage:", error);
-    const senderName = candidateProfile.fullName || "Un candidat passionné";
-    return `Bonjour ${contactName},\n\nAyant un vif intérêt pour vos activités au sein de ${contactCompany}, je serais ravi de vous rejoindre sur LinkedIn pour échanger sur vos parcours et opportunités dans ce secteur.\n\nBien cordialement,\n${senderName}`;
+    console.warn("[generateOutreachMessage] AI models unavailable, generating smart fallback:", error);
+    return generateFallbackMessage(contactName, contactCompany, contactJob, pointsSummary, senderName, format, opportunityTitle);
   }
 }
 
@@ -328,18 +508,27 @@ export async function handlePersonaChat(
       parts: [{ text: msg.text }]
     }));
 
-    // Generate content using model with system instructions
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: geminiHistory,
-      config: {
-        systemInstruction: systemInstruction,
-      }
-    });
+    for (const model of CASCADE_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: geminiHistory,
+          config: {
+            systemInstruction: systemInstruction,
+          }
+        });
 
-    return response.text || "Désolé, je n'ai pas pu formuler de réponse. Veuillez réessayer.";
+        if (response && response.text) {
+          return response.text;
+        }
+      } catch (err: any) {
+        console.warn(`[handlePersonaChat] Model ${model} error, trying cascade:`, err?.message || err);
+      }
+    }
+
+    return "Je suis à votre écoute pour optimiser vos candidatures et préparer vos entretiens. N'hésitez pas à reformuler votre question ou préciser votre besoin.";
   } catch (error) {
     console.error("Error in handlePersonaChat:", error);
-    return "Désolé, un problème de connexion avec l'IA de NACORA est survenu. Veuillez vous assurer que la clé d'API Gemini est correctement configurée.";
+    return "Je suis à votre écoute pour optimiser vos candidatures et préparer vos entretiens. N'hésitez pas à reformuler votre question ou préciser votre besoin.";
   }
 }

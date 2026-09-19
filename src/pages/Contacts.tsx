@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { dbStore } from "../dbStore";
-import { Contact, ContactCategory, CandidateProfile } from "../types";
+import { Contact, ContactCategory, ContactNetworkingStatus, CandidateProfile } from "../types";
 import { GlassCard, Badge, GlassButton, Modal } from "../components/Shared";
+import { LinkedInImportModal } from "../components/LinkedInImportModal";
+import { ContactDetailWorkspace } from "../components/ContactDetailWorkspace";
 import { 
   Users, 
   Upload, 
@@ -13,10 +15,16 @@ import {
   Linkedin, 
   Mail, 
   Phone, 
-  MessageSquare,
-  RefreshCw,
-  Trash2,
-  FileSpreadsheet
+  Building2, 
+  Briefcase, 
+  GraduationCap, 
+  Filter, 
+  X, 
+  ArrowUpDown, 
+  Award,
+  Link as LinkIcon,
+  UserCheck,
+  Trash2
 } from "lucide-react";
 
 interface ContactsProps {
@@ -28,23 +36,27 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [profile, setProfile] = useState<CandidateProfile>(dbStore.getProfile());
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
-  const [activeMessage, setActiveMessage] = useState<string>("");
-  const [isGeneratingMessage, setIsGeneratingMessage] = useState(false);
-  
+
+  // Filters & Search
+  const [localSearch, setLocalSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [companyFilter, setCompanyFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<"relevance" | "recent" | "name">("relevance");
+
   // Modals
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  
-  // CSV Import State
-  const [csvText, setCsvText] = useState("");
-  const [csvPreview, setCsvPreview] = useState<any[]>([]);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [contactToDelete, setContactToDelete] = useState<Contact | null>(null);
 
   // Add Contact Form State
   const [formName, setFormName] = useState("");
   const [formCompany, setFormCompany] = useState("");
   const [formJob, setFormJob] = useState("");
   const [formCategory, setFormCategory] = useState<ContactCategory>("other");
+  const [formEmail, setFormEmail] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [formLinkedIn, setFormLinkedIn] = useState("");
   const [formNotes, setFormNotes] = useState("");
 
   useEffect(() => {
@@ -52,18 +64,35 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
     setProfile(dbStore.getProfile());
 
     const unsub = dbStore.subscribe(() => {
-      setContacts(dbStore.getContacts());
+      const allContacts = dbStore.getContacts();
+      setContacts(allContacts);
       setProfile(dbStore.getProfile());
+
+      // Keep selected contact synced
+      if (selectedContact) {
+        const fresh = allContacts.find(c => c.id === selectedContact.id);
+        if (fresh) setSelectedContact(fresh);
+      }
     });
     return unsub;
-  }, []);
+  }, [selectedContact?.id]);
+
+  // Distinct company list from contacts for filter
+  const companyOptions = Array.from(new Set(contacts.map(c => c.companyName).filter(Boolean))).sort();
+
+  // Statistics
+  const totalCount = contacts.length;
+  const alumniCount = contacts.filter(c => c.category === "alumni").length;
+  const recruiterCount = contacts.filter(c => c.category === "recruiter").length;
+  const sectorProCount = contacts.filter(c => c.category === "sector_pro").length;
+  const linkedOppCount = contacts.filter(c => Boolean(c.opportunityId)).length;
 
   const handleCategoryBadge = (category: ContactCategory) => {
     switch (category) {
       case "recruiter":
         return <Badge variant="green">Recruteur / RH</Badge>;
       case "alumni":
-        return <Badge variant="blue">Alumni IUT</Badge>;
+        return <Badge variant="blue">Alumni</Badge>;
       case "student":
         return <Badge variant="purple">Étudiant</Badge>;
       case "sector_pro":
@@ -75,14 +104,32 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
     }
   };
 
-  // Filter contacts
+  // Filter & Sort contacts
+  const effectiveSearch = (localSearch || searchTerm).toLowerCase().trim();
+
   const filteredContacts = contacts.filter(c => {
-    const s = searchTerm.toLowerCase();
-    return (
-      c.fullName.toLowerCase().includes(s) ||
-      c.companyName.toLowerCase().includes(s) ||
-      c.jobTitle.toLowerCase().includes(s)
+    const matchesSearch = !effectiveSearch || (
+      c.fullName.toLowerCase().includes(effectiveSearch) ||
+      c.companyName.toLowerCase().includes(effectiveSearch) ||
+      c.jobTitle.toLowerCase().includes(effectiveSearch) ||
+      (c.academicPath && c.academicPath.toLowerCase().includes(effectiveSearch)) ||
+      (c.connectionPoints && c.connectionPoints.some(pt => pt.toLowerCase().includes(effectiveSearch)))
     );
+
+    const matchesCategory = categoryFilter === "all" || c.category === categoryFilter;
+    const matchesCompany = companyFilter === "all" || c.companyName.toLowerCase() === companyFilter.toLowerCase();
+    const matchesStatus = statusFilter === "all" || (c.networkingStatus || "to_contact") === statusFilter;
+
+    return matchesSearch && matchesCategory && matchesCompany && matchesStatus;
+  }).sort((a, b) => {
+    if (sortBy === "relevance") {
+      return (b.relevanceScore || 0) - (a.relevanceScore || 0);
+    }
+    if (sortBy === "name") {
+      return a.fullName.localeCompare(b.fullName);
+    }
+    // "recent"
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
   // Manual Add Contact
@@ -100,20 +147,33 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
     const linkedCo = dbStore.getCompanyByNameOrCreate(formCompany);
 
     const newContact = dbStore.addContact({
-      fullName: formName,
+      fullName: formName.trim(),
       firstName,
       lastName,
       companyId: linkedCo.id,
       companyName: linkedCo.name,
-      jobTitle: formJob,
-      normalizedJobTitle: formJob,
+      jobTitle: formJob.trim(),
+      normalizedJobTitle: formJob.trim(),
       category: formCategory,
-      relevanceScore: formCategory === "alumni" ? 90 : formCategory === "recruiter" ? 85 : 50,
+      relevanceScore: formCategory === "alumni" ? 90 : formCategory === "recruiter" ? 85 : formCategory === "sector_pro" ? 80 : 50,
       connectionPoints: [
-        formCategory === "alumni" ? "Réseau Alumni / Établissement d'études" : "Contact Professionnel"
+        formCategory === "alumni" ? "Réseau Alumni / Établissement d'études" : 
+        formCategory === "recruiter" ? "Contact RH & Recrutement" : "Contact Professionnel"
       ],
       previousCompanies: [],
-      notes: formNotes || "Ajouté manuellement"
+      notes: formNotes || "Ajouté manuellement",
+      email: formEmail.trim() || undefined,
+      phone: formPhone.trim() || undefined,
+      linkedInUrl: formLinkedIn.trim() || undefined,
+      networkingStatus: "to_contact",
+      history: [
+        {
+          id: "hist_" + Math.random().toString(36).substring(2, 9),
+          type: "import",
+          label: "Contact ajouté manuellement au carnet",
+          timestamp: new Date().toISOString()
+        }
+      ]
     });
 
     showToast(`Contact "${formName}" ajouté avec succès`, "success");
@@ -121,6 +181,9 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
     setFormCompany("");
     setFormJob("");
     setFormCategory("other");
+    setFormEmail("");
+    setFormPhone("");
+    setFormLinkedIn("");
     setFormNotes("");
     setIsAddModalOpen(false);
   };
@@ -132,165 +195,39 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
     setSelectedContact(null);
   };
 
-  // CSV Import drag/drop mock parse helper
-  const handleParseCsv = () => {
-    if (!csvText.trim()) {
-      showToast("Veuillez coller du texte au format CSV", "error");
-      return;
-    }
-
-    try {
-      const lines = csvText.split("\n").filter(l => l.trim());
-      if (lines.length < 2) {
-        showToast("Format invalide. En-tête + données requis.", "error");
-        return;
-      }
-
-      // First Name, Last Name, Job Title, Company
-      const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
-      const records: any[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const cells = lines[i].split(",").map(c => c.trim().replace(/^"|"$/g, ""));
-        const record: any = {};
-        headers.forEach((h, idx) => {
-          record[h] = cells[idx] || "";
-        });
-        records.push(record);
-      }
-
-      setCsvPreview(records);
-      showToast(`${records.length} fiches lues. Prêt pour l'analyse IA de NACORA !`, "info");
-    } catch (e) {
-      showToast("Erreur d'analyse CSV", "error");
-    }
-  };
-
-  // Batch analysis with Gemini API
-  const handleConfirmImport = async () => {
-    if (csvPreview.length === 0) return;
-
-    setIsAnalyzing(true);
-    showToast("Analyse et classement automatique des contacts par Gemini...", "ai");
-
-    try {
-      const rawPayload = csvPreview.map(c => ({
-        fullName: c.fullname || `${c.firstname || ''} ${c.lastname || ''}`.trim() || "Inconnu",
-        jobTitle: c.poste || c.jobtitle || c.title || "Professionnel",
-        companyName: c.entreprise || c.company || "À préciser"
-      }));
-
-      const response = await fetch("/api/gemini", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "analyzeLinkedIn",
-          payload: {
-            rawContacts: rawPayload,
-            profile: profile
-          }
-        })
-      });
-
-      if (!response.ok) throw new Error("API analysis issue");
-      const analyzed: any[] = await response.json();
-
-      analyzed.forEach(item => {
-        const linkedCo = dbStore.getCompanyByNameOrCreate(item.companyName || "À préciser");
-        const parts = item.fullName.split(" ");
-        dbStore.addContact({
-          fullName: item.fullName,
-          firstName: parts[0] || "",
-          lastName: parts.slice(1).join(" ") || "",
-          companyId: linkedCo.id,
-          companyName: linkedCo.name,
-          jobTitle: item.normalizedJobTitle || "Professionnel",
-          normalizedJobTitle: item.normalizedJobTitle || "Professionnel",
-          category: item.category || "other",
-          relevanceScore: item.relevanceScore || 50,
-          connectionPoints: item.connectionPoints || [],
-          academicPath: item.academicPath || "",
-          previousCompanies: item.previousCompanies || [],
-          notes: "Importé via LinkedIn et classé par l'IA de NACORA."
-        });
-      });
-
-      showToast(`Import réussi de ${analyzed.length} contacts classés par IA !`, "success");
-      setCsvPreview([]);
-      setCsvText("");
-      setIsImportModalOpen(false);
-    } catch (err) {
-      console.error(err);
-      showToast("Échec de l'analyse IA. Import des fiches en mode standard.", "error");
-      
-      // Fallback import
-      csvPreview.forEach(c => {
-        const fullName = c.fullname || `${c.firstname || ''} ${c.lastname || ''}`.trim() || "Inconnu";
-        const companyName = c.entreprise || c.company || "À préciser";
-        const jobTitle = c.poste || c.jobtitle || "Professionnel";
-        const linkedCo = dbStore.getCompanyByNameOrCreate(companyName);
-        dbStore.addContact({
-          fullName,
-          firstName: c.firstname || "",
-          lastName: c.lastname || "",
-          companyId: linkedCo.id,
-          companyName: linkedCo.name,
-          jobTitle,
-          normalizedJobTitle: jobTitle,
-          category: "other",
-          relevanceScore: 50,
-          connectionPoints: ["Importé via CSV"],
-          previousCompanies: [],
-          notes: "Importé via CSV"
-        });
-      });
-      setIsImportModalOpen(false);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  // Generate customized message with Gemini AI
-  const handleGenerateOutreach = async (contact: Contact) => {
-    setIsGeneratingMessage(true);
-    showToast(`Rédaction du message d'approche personnalisé par l'IA...`, "ai");
-
-    try {
-      const response = await fetch("/api/gemini", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "outreachMessage",
-          payload: {
-            contactName: contact.fullName,
-            contactJob: contact.jobTitle,
-            contactCompany: contact.companyName,
-            connectionPoints: contact.connectionPoints,
-            profile: profile
-          }
-        })
-      });
-
-      if (!response.ok) throw new Error("API message failed");
-      const data = await response.json();
-
-      setActiveMessage(data.message);
-      showToast("Message personnalisé rédigé !", "success");
-    } catch (err) {
-      console.error(err);
-      showToast("Erreur de rédaction IA", "error");
-    } finally {
-      setIsGeneratingMessage(false);
-    }
-  };
+  // If a contact is selected, display the full-width workspace (similar to Opportunities)
+  if (selectedContact) {
+    return (
+      <div className="relative z-10 w-full">
+        <ContactDetailWorkspace
+          contact={selectedContact}
+          profile={profile}
+          onClose={() => setSelectedContact(null)}
+          onUpdate={(updated) => {
+            setSelectedContact(updated);
+            setContacts(dbStore.getContacts());
+          }}
+          onDelete={handleDeleteContact}
+          showToast={showToast}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="relative z-10 w-full space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-2">
+    <div className="relative z-10 w-full space-y-5">
+      
+      {/* ========================================================================= */}
+      {/* 1. HEADER SECTION                                                         */}
+      {/* ========================================================================= */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-extrabold text-[#F5F6FA] tracking-tight font-display whitespace-nowrap">Réseau & Contacts</h1>
-          <p className="text-[#9AA0B2] text-xs sm:text-sm mt-0.5">Gère tes relations professionnelles, identifie les Alumni et génère des messages de prospection</p>
+          <h1 className="text-2xl lg:text-3xl font-extrabold text-[#F5F6FA] tracking-tight font-display whitespace-nowrap">
+            Réseau & Contacts
+          </h1>
+          <p className="text-[#9AA0B2] text-xs sm:text-sm mt-0.5">
+            Gérez vos relations professionnelles, ciblez les Alumni et générez des messages d'approche personnalisés
+          </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <GlassButton 
@@ -312,59 +249,251 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
         </div>
       </div>
 
-      {/* Grid view of contacts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredContacts.map(contact => (
-          <GlassCard
-            key={contact.id}
-            onClick={() => {
-              setSelectedContact(contact);
-              setActiveMessage("");
-            }}
-            className="p-5 flex flex-col justify-between"
-            hoverable
-          >
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-3">
-                {handleCategoryBadge(contact.category)}
-                <span className="text-xs font-bold text-[#9AA0B2] bg-black/40 px-2.5 py-1 rounded-full border border-white/5">
-                  Score : {contact.relevanceScore}%
-                </span>
-              </div>
-              
-              <h3 className="text-sm font-bold text-[#F5F6FA] mb-1 leading-normal font-display">{contact.fullName}</h3>
-              <p className="text-xs text-[#9AA0B2] line-clamp-1">{contact.jobTitle}</p>
-              <p className="text-xs text-[#FF6685] font-semibold mt-0.5">{contact.companyName}</p>
+      {/* ========================================================================= */}
+      {/* 2. STATS BANNER                                                           */}
+      {/* ========================================================================= */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 flex flex-col justify-between">
+          <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase">Total Contacts</span>
+          <span className="text-xl font-extrabold text-[#F5F6FA] font-display mt-1">{totalCount}</span>
+        </div>
 
-              {/* Display connection highlights */}
-              {contact.connectionPoints.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-white/10 space-y-1.5">
-                  <span className="text-[10px] text-[#9AA0B2] uppercase font-semibold">Points de connexion :</span>
-                  {contact.connectionPoints.slice(0, 2).map((pt, i) => (
-                    <div key={i} className="text-[11px] text-purple-300 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                      <span className="truncate">{pt}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+        <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-[rgba(14,165,233,0.2)] flex flex-col justify-between">
+          <span className="text-[11px] font-semibold text-[#38bdf8] uppercase">Alumni</span>
+          <span className="text-xl font-extrabold text-[#38bdf8] font-display mt-1">{alumniCount}</span>
+        </div>
 
-            <div className="mt-5 pt-3 border-t border-white/10 flex justify-end">
-              <span className="text-xs font-bold text-[#FF6685] flex items-center gap-1 hover:text-[#F5F6FA] transition-spring cursor-pointer">
-                <span>Consulter la fiche</span>
-                <ChevronRight className="w-4 h-4" />
-              </span>
-            </div>
-          </GlassCard>
-        ))}
+        <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-[rgba(18,183,106,0.2)] flex flex-col justify-between">
+          <span className="text-[11px] font-semibold text-[#12B76A] uppercase">Recruteurs RH</span>
+          <span className="text-xl font-extrabold text-[#12B76A] font-display mt-1">{recruiterCount}</span>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-[rgba(247,144,9,0.2)] flex flex-col justify-between">
+          <span className="text-[11px] font-semibold text-[#f79009] uppercase">Pro Secteur Cible</span>
+          <span className="text-xl font-extrabold text-[#f79009] font-display mt-1">{sectorProCount}</span>
+        </div>
+
+        <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-[rgba(216,26,69,0.25)] flex flex-col justify-between col-span-2 sm:col-span-1">
+          <span className="text-[11px] font-semibold text-[#FF6685] uppercase">Liés à des Offres</span>
+          <span className="text-xl font-extrabold text-[#FF6685] font-display mt-1">{linkedOppCount}</span>
+        </div>
       </div>
 
-      {/* --- ADD CONTACT MODAL --- */}
+      {/* ========================================================================= */}
+      {/* 3. FILTERS & SEARCH BAR                                                   */}
+      {/* ========================================================================= */}
+      <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+        {/* Top filter row: Search input + Company dropdown + Sort dropdown */}
+        <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
+          {/* Search */}
+          <div className="relative flex-1 w-full">
+            <Search className="w-4 h-4 text-[#9AA0B2] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Rechercher par nom, poste, entreprise, points de connexion..."
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              className="glass-input pl-10 pr-9 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60 w-full"
+            />
+            {localSearch && (
+              <button 
+                onClick={() => setLocalSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9AA0B2] hover:text-[#F5F6FA] cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto shrink-0">
+            {/* Company Filter */}
+            {companyOptions.length > 0 && (
+              <select
+                value={companyFilter}
+                onChange={(e) => setCompanyFilter(e.target.value)}
+                className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer"
+              >
+                <option value="all" className="bg-[#060812] text-[#F5F6FA]">Toutes les entreprises</option>
+                {companyOptions.map((co) => (
+                  <option key={co} value={co} className="bg-[#060812] text-[#F5F6FA]">
+                    {co}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Status Filter */}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer"
+            >
+              <option value="all" className="bg-[#060812] text-[#F5F6FA]">Tous les statuts</option>
+              <option value="to_contact" className="bg-[#060812] text-[#F5F6FA]">À contacter</option>
+              <option value="contacted" className="bg-[#060812] text-[#F5F6FA]">Message envoyé</option>
+              <option value="exchanging" className="bg-[#060812] text-[#F5F6FA]">Échange en cours</option>
+              <option value="interview_done" className="bg-[#060812] text-[#F5F6FA]">Entretien réalisé</option>
+              <option value="not_interested" className="bg-[#060812] text-[#F5F6FA]">Sans suite</option>
+            </select>
+
+            {/* Sort Dropdown */}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer"
+            >
+              <option value="relevance" className="bg-[#060812] text-[#F5F6FA]">Trier : Pertinence</option>
+              <option value="recent" className="bg-[#060812] text-[#F5F6FA]">Trier : Plus récents</option>
+              <option value="name" className="bg-[#060812] text-[#F5F6FA]">Trier : Nom (A-Z)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Category Filter Pills (Sober Liquid Glass) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none flex-nowrap pt-1">
+          {[
+            { id: "all", label: `Tous (${totalCount})` },
+            { id: "alumni", label: `Alumni (${alumniCount})` },
+            { id: "recruiter", label: `Recruteurs RH (${recruiterCount})` },
+            { id: "sector_pro", label: `Pro Secteur (${sectorProCount})` },
+            { id: "student", label: `Étudiants (${contacts.filter(c => c.category === "student").length})` },
+            { id: "other_pro", label: "Autres Pro" },
+          ].map((item) => {
+            const isActive = categoryFilter === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setCategoryFilter(item.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer ${
+                  isActive
+                    ? "bg-[rgba(216,26,69,0.18)] text-[#FF6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.15)]"
+                    : "bg-white/[0.03] hover:bg-white/[0.08] text-[#9AA0B2] border-white/5"
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 4. CONTACTS GRID                                                          */}
+      {/* ========================================================================= */}
+      {filteredContacts.length === 0 ? (
+        <div className="p-12 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-3">
+          <Users className="w-10 h-10 text-[#9AA0B2] mx-auto opacity-50" />
+          <h3 className="text-base font-bold text-[#F5F6FA] font-display">Aucun contact trouvé</h3>
+          <p className="text-xs text-[#9AA0B2] max-w-md mx-auto">
+            {effectiveSearch || categoryFilter !== "all" || companyFilter !== "all"
+              ? "Aucun contact ne correspond à vos filtres actuels. Réinitialisez vos critères de recherche."
+              : "Votre carnet de contacts est actuellement vide. Importez vos relations LinkedIn ou ajoutez un contact manuellement."}
+          </p>
+          {(effectiveSearch || categoryFilter !== "all" || companyFilter !== "all") && (
+            <button
+              onClick={() => {
+                setLocalSearch("");
+                setCategoryFilter("all");
+                setCompanyFilter("all");
+                setStatusFilter("all");
+              }}
+              className="text-xs text-[#FF6685] hover:underline font-semibold cursor-pointer"
+            >
+              Réinitialiser les filtres
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredContacts.map(contact => (
+            <GlassCard
+              key={contact.id}
+              onClick={() => setSelectedContact(contact)}
+              className="p-5 flex flex-col justify-between transition-all duration-200"
+              hoverable
+            >
+              <div className="space-y-3">
+                {/* Top Badge Row: Category + Relevance Score */}
+                <div className="flex items-center justify-between gap-2">
+                  {handleCategoryBadge(contact.category)}
+                  <span className="text-xs font-bold text-[#F5F6FA] bg-white/[0.04] px-2.5 py-0.5 rounded-full border border-white/10">
+                    {contact.relevanceScore}%
+                  </span>
+                </div>
+                
+                {/* Contact Identity: Exact requested hierarchy */}
+                <div className="space-y-0.5">
+                  <h3 className="text-sm font-bold text-[#F5F6FA] leading-snug font-display truncate">
+                    {contact.fullName}
+                  </h3>
+                  <p className="text-xs text-[#9AA0B2] line-clamp-1">{contact.jobTitle}</p>
+                  <p className="text-xs text-[#FF6685] font-semibold flex items-center gap-1.5 mt-0.5">
+                    <Building2 className="w-3 h-3 text-[#FF6685] shrink-0" />
+                    <span className="truncate">{contact.companyName}</span>
+                  </p>
+                </div>
+
+                {/* Connection Points Highlights */}
+                {contact.connectionPoints && contact.connectionPoints.length > 0 && (
+                  <div className="pt-2.5 border-t border-white/5 space-y-1">
+                    <span className="text-[10px] text-[#9AA0B2] uppercase font-semibold block">Points de connexion</span>
+                    {contact.connectionPoints.slice(0, 2).map((pt, i) => (
+                      <div key={i} className="text-[11px] text-purple-200 flex items-center gap-1.5">
+                        <Sparkles className="w-3 h-3 text-[#C084FC] shrink-0" />
+                        <span className="truncate">{pt}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Card Footer: Status or LinkedIn + View Action */}
+              <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  {contact.linkedInUrl && (
+                    <span className="text-[#38bdf8]" title="Profil LinkedIn disponible">
+                      <Linkedin className="w-3.5 h-3.5" />
+                    </span>
+                  )}
+                  {contact.opportunityTitle && (
+                    <span className="text-[#34D399] flex items-center gap-1 text-[11px]" title={`Lié à : ${contact.opportunityTitle}`}>
+                      <LinkIcon className="w-3 h-3" />
+                      <span className="truncate max-w-[100px]">Offre liée</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setContactToDelete(contact);
+                    }}
+                    className="p-1 rounded-lg text-[#9AA0B2] hover:text-[#F04438] hover:bg-red-500/10 transition-colors cursor-pointer"
+                    title="Supprimer ce contact"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+
+                  <span className="font-bold text-[#FF6685] flex items-center gap-1 hover:text-[#F5F6FA] transition-colors cursor-pointer">
+                    <span>Consulter</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </span>
+                </div>
+              </div>
+            </GlassCard>
+          ))}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. ADD CONTACT MODAL                                                      */}
+      {/* ========================================================================= */}
       <Modal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        title="Ajouter un contact"
+        title="Ajouter un contact au réseau"
         size="md"
       >
         <form onSubmit={handleAddContact} className="space-y-4">
@@ -376,20 +505,20 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
               placeholder="ex: Sophie Martin"
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
-              className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+              className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs text-[#9AA0B2] font-semibold">Entreprise *</label>
               <input
                 type="text"
                 required
-                placeholder="ex: LCL"
+                placeholder="ex: LCL, Crédit Agricole..."
                 value={formCompany}
                 onChange={(e) => setFormCompany(e.target.value)}
-                className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+                className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
               />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -397,10 +526,10 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
               <input
                 type="text"
                 required
-                placeholder="ex: Conseiller Patrimonial"
+                placeholder="ex: Conseillère Patrimoniale"
                 value={formJob}
                 onChange={(e) => setFormJob(e.target.value)}
-                className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+                className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
               />
             </div>
           </div>
@@ -410,28 +539,62 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
             <select
               value={formCategory}
               onChange={(e) => setFormCategory(e.target.value as any)}
-              className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] bg-[#060812]"
+              className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] bg-[#060812]"
             >
+              <option value="alumni" className="bg-[#060812] text-[#F5F6FA]">Alumni (Même formation / école)</option>
               <option value="recruiter" className="bg-[#060812] text-[#F5F6FA]">Recruteur / RH</option>
-              <option value="alumni" className="bg-[#060812] text-[#F5F6FA]">Alumni (Même école)</option>
+              <option value="sector_pro" className="bg-[#060812] text-[#F5F6FA]">Professionnel Secteur Cible</option>
               <option value="student" className="bg-[#060812] text-[#F5F6FA]">Étudiant</option>
-              <option value="sector_pro" className="bg-[#060812] text-[#F5F6FA]">Professionnel Secteur Ciblé</option>
-              <option value="other_pro" className="bg-[#060812] text-[#F5F6FA]">Professionnel Hors Secteur</option>
+              <option value="other_pro" className="bg-[#060812] text-[#F5F6FA]">Professionnel Autre Secteur</option>
               <option value="other" className="bg-[#060812] text-[#F5F6FA]">Autre</option>
             </select>
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[#9AA0B2] font-semibold">Email (optionnel)</label>
+              <input
+                type="email"
+                placeholder="ex: contact@entreprise.fr"
+                value={formEmail}
+                onChange={(e) => setFormEmail(e.target.value)}
+                className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[#9AA0B2] font-semibold">Téléphone (optionnel)</label>
+              <input
+                type="tel"
+                placeholder="ex: 06 12 34 56 78"
+                value={formPhone}
+                onChange={(e) => setFormPhone(e.target.value)}
+                className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+              />
+            </div>
+          </div>
+
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-[#9AA0B2] font-semibold">Notes / Informations</label>
-            <textarea
-              placeholder="ex: Rencontrée au forum carrières, m'a proposé d'envoyer mon CV."
-              value={formNotes}
-              onChange={(e) => setFormNotes(e.target.value)}
-              className="w-full min-h-[80px] glass-input p-3 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+            <label className="text-xs text-[#9AA0B2] font-semibold">URL LinkedIn (optionnel)</label>
+            <input
+              type="url"
+              placeholder="https://www.linkedin.com/in/..."
+              value={formLinkedIn}
+              onChange={(e) => setFormLinkedIn(e.target.value)}
+              className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
             />
           </div>
 
-          <div className="flex justify-end gap-3 pt-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-[#9AA0B2] font-semibold">Notes / Informations de contexte</label>
+            <textarea
+              placeholder="ex: Rencontrée lors d'un forum carrières, très bon contact pour échange sur le secteur..."
+              value={formNotes}
+              onChange={(e) => setFormNotes(e.target.value)}
+              className="w-full min-h-[75px] glass-input p-3 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
             <GlassButton type="button" variant="ghost" onClick={() => setIsAddModalOpen(false)}>
               Annuler
             </GlassButton>
@@ -442,166 +605,53 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm }) => 
         </form>
       </Modal>
 
-      {/* --- IMPORT LINKEDIN MODAL --- */}
-      <Modal
+      {/* ========================================================================= */}
+      {/* 6. IMPORT LINKEDIN MODAL (Preserved completely)                           */}
+      {/* ========================================================================= */}
+      <LinkedInImportModal
         isOpen={isImportModalOpen}
-        onClose={() => {
-          setIsImportModalOpen(false);
-          setCsvText("");
-          setCsvPreview([]);
-        }}
-        title="Importer vos connexions LinkedIn (CSV)"
-        size="lg"
+        onClose={() => setIsImportModalOpen(false)}
+        candidateProfile={profile}
+        showToast={showToast}
+      />
+
+      {/* ========================================================================= */}
+      {/* 7. DELETE CONFIRMATION MODAL                                              */}
+      {/* ========================================================================= */}
+      <Modal
+        isOpen={Boolean(contactToDelete)}
+        onClose={() => setContactToDelete(null)}
+        title="Supprimer le contact"
+        size="sm"
       >
         <div className="space-y-4">
-          <p className="text-xs text-[#9AA0B2] leading-relaxed">
-            Pour exporter vos connexions depuis LinkedIn : Réseau &gt; Gérer mon réseau &gt; Contacts &gt; Exporter les contacts.
-            Collez le contenu du fichier CSV extrait ci-dessous pour le catégoriser avec l'IA.
-          </p>
-
-          <div className="bg-white/[0.03] p-3.5 rounded-2xl border border-white/10 text-[11px] text-[#F79009] leading-relaxed">
-            <strong>Format standard de l'export LinkedIn :</strong><br />
-            <code>firstname, lastname, jobtitle, company</code><br />
-            <span className="text-[#9AA0B2]">Exemple : Clara, Dubois, Product Manager, Luko</span>
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-200 leading-relaxed">
+            Êtes-vous sûr de vouloir supprimer définitivement le contact <strong className="text-white font-bold">{contactToDelete?.fullName}</strong> ({contactToDelete?.companyName}) ?
+            Cette action est irréversible.
           </div>
-
-          <textarea
-            value={csvText}
-            onChange={(e) => setCsvText(e.target.value)}
-            placeholder="firstname, lastname, jobtitle, company&#10;Sophie, Martin, Conseillère Patrimoniale, LCL"
-            className="w-full min-h-[150px] glass-input p-3.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60 font-mono"
-          />
-
-          <div className="flex justify-between items-center">
-            <span className="text-xs text-[#9AA0B2]">
-              {csvPreview.length > 0 ? `${csvPreview.length} contacts détectés` : "Aucune ligne lue"}
-            </span>
-            <div className="flex gap-2">
-              <GlassButton type="button" size="sm" variant="secondary" onClick={handleParseCsv}>
-                Analyser le CSV
-              </GlassButton>
-              {csvPreview.length > 0 && (
-                <GlassButton 
-                  type="button" 
-                  size="sm" 
-                  variant="ai" 
-                  disabled={isAnalyzing}
-                  onClick={handleConfirmImport}
-                >
-                  {isAnalyzing ? "Analyse IA..." : `Classer par IA & Importer (${csvPreview.length})`}
-                </GlassButton>
-              )}
-            </div>
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <GlassButton
+              variant="ghost"
+              size="sm"
+              onClick={() => setContactToDelete(null)}
+            >
+              Annuler
+            </GlassButton>
+            <GlassButton
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                if (contactToDelete) {
+                  handleDeleteContact(contactToDelete.id);
+                  setContactToDelete(null);
+                }
+              }}
+            >
+              Confirmer la suppression
+            </GlassButton>
           </div>
         </div>
       </Modal>
-
-      {/* --- CONTACT WORKSPACE / DETAIL MODAL --- */}
-      {selectedContact && (
-        <Modal
-          isOpen={!!selectedContact}
-          onClose={() => setSelectedContact(null)}
-          title={selectedContact.fullName}
-          size="lg"
-        >
-          <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/10">
-              <div className="flex items-center gap-2">
-                {handleCategoryBadge(selectedContact.category)}
-                <Badge variant="gray">Score : {selectedContact.relevanceScore}%</Badge>
-              </div>
-              <GlassButton 
-                size="sm" 
-                variant="ghost" 
-                onClick={() => handleDeleteContact(selectedContact.id)}
-                icon={<Trash2 className="w-3.5 h-3.5 text-[#F04438]" />}
-              >
-                <span className="text-[#F04438]">Supprimer le contact</span>
-              </GlassButton>
-            </div>
-
-            {/* General Info */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <h4 className="text-xs text-[#9AA0B2] uppercase font-semibold">Poste Actuel</h4>
-                <p className="text-sm font-bold text-[#F5F6FA] font-display">{selectedContact.jobTitle}</p>
-                <p className="text-xs text-[#FF6685] font-semibold">{selectedContact.companyName}</p>
-              </div>
-              <div className="space-y-1">
-                <h4 className="text-xs text-[#9AA0B2] uppercase font-semibold">Parcours Académique</h4>
-                <p className="text-xs text-[#9AA0B2]">
-                  {selectedContact.academicPath || "Non renseigné"}
-                </p>
-              </div>
-            </div>
-
-            {/* AI message custom composer */}
-            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold text-[#F5F6FA] uppercase tracking-wider flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-purple-400" />
-                  Message d'approche personnalisé par IA
-                </h4>
-                <GlassButton
-                  variant="ai"
-                  size="sm"
-                  disabled={isGeneratingMessage}
-                  onClick={() => handleGenerateOutreach(selectedContact)}
-                >
-                  {isGeneratingMessage ? "Rédaction..." : "Générer avec Gemini"}
-                </GlassButton>
-              </div>
-              
-              {activeMessage ? (
-                <div className="space-y-3">
-                  <textarea
-                    value={activeMessage}
-                    onChange={(e) => setActiveMessage(e.target.value)}
-                    className="w-full min-h-[120px] glass-input p-3.5 text-xs text-[#F5F6FA] leading-relaxed focus:border-purple-400/50"
-                  />
-                  <div className="flex justify-between items-center text-[10px] text-[#9AA0B2]">
-                    <span>Message optimisé pour l'invitation de connexion LinkedIn ({activeMessage.length} caractères)</span>
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(activeMessage);
-                        showToast("Message copié dans le presse-papiers !", "success");
-                      }}
-                      className="text-xs text-purple-300 hover:underline cursor-pointer font-semibold"
-                    >
-                      Copier le texte
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-xs text-[#9AA0B2] italic">
-                  Clique sur "Générer avec Gemini" pour composer une invitation personnalisée tirant parti de vos points communs (Alumni, secteur finance, etc.).
-                </p>
-              )}
-            </div>
-
-            {/* Note manager */}
-            <div className="space-y-2">
-              <h4 className="text-xs text-[#9AA0B2] uppercase font-semibold">Notes de suivi</h4>
-              <textarea
-                value={selectedContact.notes}
-                onChange={(e) => {
-                  const updated = { ...selectedContact, notes: e.target.value };
-                  setSelectedContact(updated);
-                  dbStore.updateContact(updated);
-                }}
-                className="w-full min-h-[80px] glass-input p-3 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
-                placeholder="Ajoute tes notes (ex: Date d'envoi du message, rendez-vous fixé...)"
-              />
-            </div>
-
-            <div className="flex justify-end pt-4 border-t border-white/10">
-              <GlassButton variant="secondary" onClick={() => setSelectedContact(null)}>
-                Fermer la fiche
-              </GlassButton>
-            </div>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 };
