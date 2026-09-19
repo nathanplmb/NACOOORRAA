@@ -392,20 +392,14 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
               <FileSpreadsheet className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm sm:text-base font-bold text-[#F5F6FA] font-display truncate">
-                  Importation des Connexions LinkedIn
-                </h3>
-                <span className="text-[10px] font-semibold text-[#c084fc] bg-purple-950/40 border border-purple-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1 shrink-0">
-                  <Sparkles className="w-3 h-3" />
-                  IA & Anti-doublon
-                </span>
-              </div>
+              <h3 className="text-sm sm:text-base font-bold text-[#F5F6FA] font-display truncate">
+                Importation des connexions LinkedIn
+              </h3>
               <p className="text-xs text-[#9AA0B2] truncate mt-0.5">
                 {step === "upload" && "Importez votre fichier officiel Connections.csv de LinkedIn"}
-                {step === "processing" && "Analyse sémantique et détection des doublons en cours..."}
-                {step === "preview" && "Vérifiez la classification et choisissez les actions pour chaque contact"}
-                {step === "done" && "Importation finalisée avec succès dans votre base NACORA"}
+                {step === "processing" && "Analyse des contacts en cours…"}
+                {step === "preview" && "Vérifiez la liste des contacts et confirmez l'importation"}
+                {step === "done" && "Importation finalisée dans votre espace réseau"}
               </p>
             </div>
           </div>
@@ -523,9 +517,9 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
                       variant="primary" 
                       size="md" 
                       onClick={handlePasteSubmit}
-                      icon={<Sparkles className="w-4 h-4 text-white" />}
+                      icon={<ArrowRight className="w-4 h-4 text-white" />}
                     >
-                      Lancer l'analyse IA
+                      Analyser les contacts
                     </GlassButton>
                   </div>
                 </div>
@@ -537,8 +531,8 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
           {step === "processing" && (
             <div className="py-4 px-2 flex flex-col items-center justify-center text-center space-y-4 max-w-md mx-auto">
               <div className="relative">
-                <div className="w-12 h-12 rounded-2xl bg-[rgba(216,26,69,0.12)] border border-[rgba(216,26,69,0.25)] flex items-center justify-center text-[#ff6685] shadow-[0_0_20px_rgba(216,26,69,0.2)]">
-                  <Sparkles className="w-6 h-6 text-[#c084fc]" />
+                <div className="w-12 h-12 rounded-2xl bg-[rgba(216,26,69,0.14)] border border-[rgba(216,26,69,0.3)] flex items-center justify-center text-[#ff6685] shadow-[0_0_20px_rgba(216,26,69,0.2)]">
+                  <FileSpreadsheet className="w-6 h-6 text-[#ff6685]" />
                 </div>
                 <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-lg bg-[#060812] border border-white/20 flex items-center justify-center">
                   <RefreshCw className="w-3 h-3 text-[#38bdf8] animate-spin" />
@@ -547,7 +541,7 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
 
               <div className="space-y-1">
                 <h3 className="text-base sm:text-lg font-bold text-[#F5F6FA] font-display">
-                  Analyse et classification intelligente
+                  Analyse des contacts en cours…
                 </h3>
                 <p className="text-xs text-[#9AA0B2] font-medium">
                   {statusMessage || `Analyse du lot ${currentBatchIndex} sur ${totalBatches || 1}`}
@@ -563,23 +557,35 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
                   />
                 </div>
                 <div className="flex items-center justify-between text-[11px] font-semibold text-[#9AA0B2]">
-                  <span className="text-[#F5F6FA]">Lot {currentBatchIndex} sur {totalBatches}</span>
+                  <span className="text-[#F5F6FA]">Lot {currentBatchIndex} sur {totalBatches || 1}</span>
                   <span>{processedCount} / {totalCount} contacts analysés</span>
                   <span className="text-[#FF6685] font-bold">{progressPercent}%</span>
                 </div>
               </div>
 
-              {/* Compact Real-Time Ops Card */}
-              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 text-[11px] text-[#9AA0B2] text-left w-full space-y-1.5">
-                <div className="flex items-center gap-1.5 text-purple-300 font-semibold">
-                  <Sparkles className="w-3 h-3 text-[#c084fc]" />
-                  <span>Opérations automatiques en temps réel :</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-[#9AA0B2]/90 leading-tight">
-                  <p>• Normalisation des intitulés & fonctions</p>
-                  <p>• Détection Alumni ({candidateProfile.currentSituation || "Établissement"})</p>
-                  <p>• Identification Recruteurs RH & Pros</p>
-                  <p>• Contrôle anti-doublon en direct</p>
+              {/* Sober Informative Card */}
+              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 text-left w-full space-y-2">
+                <span className="text-xs font-semibold text-[#F5F6FA] flex items-center gap-1.5">
+                  <CheckCircle className="w-3.5 h-3.5 text-[#ff6685]" />
+                  Vérifications en cours :
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-[#9AA0B2]">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#ff6685]" />
+                    <span>Normalisation des informations</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />
+                    <span>Détection des Alumni</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#12B76A]" />
+                    <span>Identification des profils pertinents</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#f79009]" />
+                    <span>Vérification des doublons</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -607,8 +613,8 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
                   <p className="text-lg font-bold text-[#38bdf8] font-display">{totalAlumni}</p>
                 </div>
                 <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-0.5">
-                  <span className="text-[10px] text-[#c084fc] uppercase font-semibold">Recruteurs RH</span>
-                  <p className="text-lg font-bold text-[#c084fc] font-display">{totalRecruiters}</p>
+                  <span className="text-[10px] text-[#F5F6FA] uppercase font-semibold">Recruteurs RH</span>
+                  <p className="text-lg font-bold text-[#F5F6FA] font-display">{totalRecruiters}</p>
                 </div>
               </div>
 
@@ -808,11 +814,11 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
 
                             {/* Connection Points Badges */}
                             {candidate.connectionPoints && candidate.connectionPoints.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1 pt-1">
+                              <div className="flex flex-wrap items-center gap-1.5 pt-1">
                                 {candidate.connectionPoints.map((pt, pIdx) => (
-                                  <span key={pIdx} className="text-[10px] text-purple-300 bg-purple-950/30 border border-purple-500/20 px-1.5 py-0.5 rounded flex items-center gap-1">
-                                    <Sparkles className="w-2.5 h-2.5 text-purple-400" />
-                                    {pt}
+                                  <span key={pIdx} className="text-[10px] text-[#9AA0B2] bg-white/[0.04] border border-white/10 px-2 py-0.5 rounded-md flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[#ff6685] shrink-0" />
+                                    <span>{pt}</span>
                                   </span>
                                 ))}
                               </div>

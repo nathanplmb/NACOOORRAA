@@ -119,6 +119,8 @@ export async function extractJobDetails(jobDescription: string): Promise<Extract
 
 /**
  * Heuristic classifier fallback when Gemini API is unavailable or rate limited.
+ * Follows strict hierarchy: Current Job > Current Company > Education > Past experiences.
+ * Never confuses educators/staff with students, nor marketing/business talent programs with HR recruiters.
  */
 function analyzeWithHeuristics(
   rawContacts: Array<{ fullName: string; jobTitle: string; companyName: string }>,
@@ -128,71 +130,109 @@ function analyzeWithHeuristics(
   const currentCompany = (candidateProfile.currentAlternance || "").toLowerCase();
 
   return rawContacts.map(c => {
-    const job = (c.jobTitle || "").toLowerCase();
-    const comp = (c.companyName || "").toLowerCase();
+    const rawJob = (c.jobTitle || "").trim();
+    const rawComp = (c.companyName || "").trim();
+    const job = rawJob.toLowerCase();
+    const comp = rawComp.toLowerCase();
     const name = c.fullName || "Contact";
 
     let category: ContactCategory = "other";
-    let relevanceScore = 45;
+    let relevanceScore = 40;
     const connectionPoints: string[] = [];
-    let normalizedJobTitle = c.jobTitle || "Professionnel";
+    let normalizedJobTitle = rawJob || "Professionnel";
+    let academicPath = "";
 
-    // 1. Recruiter detection
-    const isRecruiter = /recrut|talent|rh\b|drh|ressources humaines|headhunter|chasseur|campus manager|people|human resources/i.test(job);
+    // 1. Education professional / Academic staff (Teacher, Program Director, Trainer, Researcher, etc.)
+    const isEducationStaff = /(enseignant|professeur|directeur|directrice|responsable.*formation|responsable.*p[eé]dagogique|responsable.*parcours|responsable.*d[eé]partement|intervenant|formateur|formatrice|ma[iî]tre.*conf[eé]rences|chercheur|chercheuse|coordinat|doyen|secr[eé]taire.*p[eé]dagogique|charg[eé]e? d'enseignement)/i.test(job);
+
+    // 2. Genuine HR / Recruiter (Must be real HR role, not a marketer in a "Talent Program")
+    const isRecruiter = (
+      /(talent acquisition|charg[eé]e? de recrutement|responsable recrutement|directeur.*recrutement|consultant.*recrutement|cabinet.*recrutement|headhunter|chasseur de t[eê]tes|campus manager|drh\b|directeur.*rh\b|directrice.*rh\b|responsable rh\b|charg[eé]e? rh\b|gestionnaire rh\b|assistant.*rh\b|human resources|people & culture|people lead|people partner|talent partner|talent manager|recruiter|recruitment)/i.test(job)
+    ) && !(
+      /marketing|commercial|business dev|communication|d[eé]veloppeur|ing[eé]nieur|vente|vente|supply chain/i.test(job) &&
+      !/recrut|talent acquisition|rh\b/i.test(job.replace(/programme|campus|talent/gi, ""))
+    );
+
+    // 3. Alumni link (direct school / university tie with candidate)
+    const isAlumniLink = (
+      /iut|clermont|montlu[cç]on|uca\b|iae\b|polytech|auvergne/i.test(job) || 
+      /iut|clermont|montlu[cç]on|uca\b|auvergne/i.test(comp)
+    ) && (
+      profileSchool.includes("iut") || 
+      profileSchool.includes("clermont") || 
+      profileSchool.includes("montluçon") || 
+      profileSchool.includes("uca")
+    );
+
+    // 4. Sector Pro (Finance, Banking, Wealth Management, FinTech, Insurance, Audit, Private Equity)
+    const isSectorPro = (
+      /(patrimoine|wealth|banqu|financ|fintech|invest|cr[eé]dit|assurance|asset|portfolio|trading|analyste|cgp|gestion priv[eé]e|auditeur|audit|risk|conformit[eé]|m&a|private equity|courtier|actuaire|charg[eé]e? d'affaires|conseiller.*client[eè]le|gestionnaire.*compte)/i.test(job)
+    ) || (
+      /(cr[eé]dit agricole|lcl\b|bnp|soci[eé]t[eé] g[eé]n[eé]rale|axa\b|palatine|bpifrance|boursorama|revolut|bpce|caisse d'epargne|banque populaire|cic\b|rothschild|natixis|allianz|generali|swiss life|qonto|spendesk)/i.test(comp)
+    );
+
+    // 5. Student / Intern / Apprentice (Strictly active students, never education staff/teachers)
+    const isStudent = !isEducationStaff && (
+      /(^|\b|\s)(étudiant|etudiant|student|alternant|alternante|stagiaire|intern\b|apprenti|apprentie|master\s*\d|but\s*tc|licence|en recherche d'alternance|en recherche de stage)($|\b|\s)/i.test(job)
+    );
+
+    // Apply strict classification hierarchy
     if (isRecruiter) {
       category = "recruiter";
-      relevanceScore = 88;
-      connectionPoints.push("Recruteur RH / Talent Acquisition");
-      normalizedJobTitle = c.jobTitle.replace(/^(chargé de|responsable|directeur)\s+/i, (m) => m).trim();
-    }
-
-    // 2. Alumni detection (based on university / institute keywords)
-    const isAlumni = (/iut|clermont|montluçon|uca|iae|polytech|auvergne/i.test(job) || /iut|clermont|montluçon|uca|auvergne/i.test(comp)) && 
-                     (profileSchool.includes("iut") || profileSchool.includes("clermont") || profileSchool.includes("montluçon") || profileSchool.includes("uca"));
-    if (isAlumni) {
+      relevanceScore = isSectorPro ? 94 : 86;
+      connectionPoints.push(comp ? `Recruteur RH chez ${rawComp}` : "Recruteur RH / Talent Acquisition");
+      if (isAlumniLink) {
+        academicPath = "IUT / UCA Clermont Auvergne";
+        connectionPoints.unshift("Alumni du même réseau académique");
+        relevanceScore = 98;
+      }
+    } else if (isAlumniLink) {
       category = "alumni";
-      relevanceScore = Math.max(relevanceScore, 95);
-      connectionPoints.unshift("Réseau Alumni / Même établissement");
-    }
-
-    // 3. Sector pro detection (finance, banking, wealth management, fintech, insurance, audit)
-    const isSectorPro = /patrimoine|wealth|banqu|financ|fintech|invest|credit|crédit|assurance|asset|portfolio|trading|analyste|cgp|gestion privée|auditeur|risk|conformité|m&a|private equity/i.test(job) ||
-                        /crédit agricole|lcl|bnp|société générale|axa|palatine|bpifrance|luko|payplug|boursorama|revolut|bpce|caisse d'epargne|banque populaire|cic|rothschild|natixis/i.test(comp);
-    if (isSectorPro && category === "other") {
+      academicPath = "IUT / UCA Clermont Auvergne";
+      relevanceScore = isSectorPro ? 96 : 90;
+      if (isEducationStaff) {
+        connectionPoints.push("Enseignant / Cadre pédagogique UCA/IUT");
+      } else {
+        connectionPoints.push("Alumni IUT Clermont Auvergne");
+      }
+      if (isSectorPro) {
+        connectionPoints.push("Actif dans le secteur cible (Banque / Finance / Patrimoine)");
+      }
+    } else if (isSectorPro) {
       category = "sector_pro";
-      relevanceScore = 82;
-      connectionPoints.push("Professionnel du secteur cible (Banque / Finance / Patrimoine)");
-    }
-
-    // 4. Student / Intern detection
-    const isStudent = /étudiant|etudiant|student|alternan|stagiaire|intern\b|apprenti|master\s*\d|but\s*tc|licence/i.test(job);
-    if (isStudent && category === "other") {
+      relevanceScore = 84;
+      connectionPoints.push(comp ? `Professionnel chez ${rawComp}` : "Professionnel du secteur cible (Banque / Finance)");
+    } else if (isStudent) {
       category = "student";
-      relevanceScore = 65;
-      connectionPoints.push("Étudiant / En recherche de parcours");
-    } else if (category === "other" && job.length > 2) {
+      relevanceScore = isSectorPro ? 72 : 60;
+      connectionPoints.push(comp ? `Alternant / Étudiant chez ${rawComp}` : "Étudiant / En parcours de formation");
+    } else if (isEducationStaff) {
       category = "other_pro";
-      relevanceScore = 52;
+      relevanceScore = 70;
+      connectionPoints.push("Cadre de l'enseignement supérieur / Formation");
+    } else if (rawJob && rawJob.length > 2) {
+      category = "other_pro";
+      relevanceScore = 50;
       connectionPoints.push("Contact réseau professionnel");
-    }
-
-    // Bonus score if in same company as target or current alternance
-    if (currentCompany && currentCompany.length > 2 && comp.includes(currentCompany.substring(0, 8))) {
-      relevanceScore = Math.min(100, relevanceScore + 12);
-      connectionPoints.push(`Même groupe : ${c.companyName}`);
-    }
-
-    if (connectionPoints.length === 0) {
+    } else {
+      category = "other";
+      relevanceScore = 35;
       connectionPoints.push("Contact importé LinkedIn");
+    }
+
+    // Bonus for exact company match with current alternance
+    if (currentCompany && currentCompany.length > 2 && comp.includes(currentCompany.substring(0, 8))) {
+      relevanceScore = Math.min(100, relevanceScore + 10);
+      connectionPoints.push(`Même entreprise : ${rawComp}`);
     }
 
     return {
       fullName: name,
-      normalizedJobTitle: normalizedJobTitle || c.jobTitle || "Professionnel",
+      normalizedJobTitle: normalizedJobTitle || rawJob || "Professionnel",
       category,
       relevanceScore,
       connectionPoints,
-      academicPath: isAlumni ? "IUT Clermont Auvergne" : "",
+      academicPath,
       previousCompanies: []
     };
   });
@@ -223,43 +263,70 @@ export async function analyzeLinkedInContacts(
   }
 
   const prompt = `
-    Tu es l'intelligence artificielle de NACORA, un accélérateur de carrière expert en finance, banque et fintech.
-    Analyse les contacts LinkedIn ci-dessous et catégorise-les avec une haute précision par rapport au profil du candidat.
-    
+    Tu es le moteur de classification et d'enrichissement réseau de NACORA, plateforme d'accélération de carrière spécialisée en Banque, Finance, Gestion de Patrimoine et FinTech.
+
+    IMPORTANT : Analyse chaque contact selon son PROFIL GLOBAL et son ACTIVITÉ ACTUELLE RÉELLE, sans te précipiter sur un mot-clé isolé.
+
+    Hiérarchie stricte des sources d'information :
+    1. Poste actuel (Priorité absolue)
+    2. Entreprise / Organisation actuelle
+    3. Fonction réelle exercée
+    4. Parcours de formation (Ne doit JAMAIS prendre le dessus sur le poste actuel)
+    5. Expériences passées
+
     Profil du Candidat :
     - Nom : ${candidateProfile.fullName || "Candidat"}
-    - Situation / Études : ${candidateProfile.currentSituation || "Étudiant en BUT TC à l'IUT Clermont Auvergne"}
-    - Alternance actuelle : ${candidateProfile.currentAlternance || "Banque"}
+    - Situation / Études : ${candidateProfile.currentSituation || "Étudiant en BUT TC à l'IUT Clermont Auvergne (Montluçon)"}
+    - Alternance actuelle : ${candidateProfile.currentAlternance || "Crédit Agricole"}
     - Masters ciblés : ${(candidateProfile.targetMasters || []).join(", ") || "Finance / Gestion de patrimoine / Fintech"}
     - Compétences clés : ${(candidateProfile.skills || []).join(", ")}
 
-    Règles de classification :
-    1. "recruiter" : Recruteur, RH, Talent Acquisition, Chargé de recrutement, Headhunter, DRH, People Lead.
-    2. "alumni" : Personne issue du même établissement ou réseau académique (${candidateProfile.currentSituation || "IUT / Université / IAE"}).
-    3. "student" : Étudiant, alternant, stagiaire ou apprenti.
-    4. "sector_pro" : Professionnel exerçant dans les métiers ou entreprises cibles (Banque, Gestion de patrimoine, Finance de marché, FinTech, Assurance, Private Equity).
-    5. "other_pro" : Professionnel d'un autre secteur d'activité (Industrie, Santé, Dev, etc.).
-    6. "other" : Autre profil.
+    Règles fondamentales de classification par catégorie :
+
+    1. "recruiter" (Recruteur / RH) :
+       - UNIQUEMENT pour les personnes dont le métier actuel est réellement le recrutement ou les Ressources Humaines (Talent Acquisition Specialist, Chargé de recrutement, Consultant en recrutement, Headhunter, Campus Manager RH, DRH, Responsable RH, People Lead).
+       - PIÈGE À ÉVITER : Une personne en marketing, communication, vente ou ingénierie qui mentionne "Talent Campus", "Programme Jeunes Talents" ou qui travaille dans une grande entreprise n'est PAS un recruteur. Ne pas la classer en "recruiter".
+
+    2. "student" (Étudiant / Alternant / Stagiaire) :
+       - UNIQUEMENT pour les personnes actuellement en cours d'études, en alternance ou en stage (ex: "Étudiant en Master", "Alternant Conseiller", "Stagiaire Analyste", "Apprenti").
+       - PIÈGE À ÉVITER : Une personne travaillant dans une université, un IUT ou une école (Enseignant, Professeur, Responsable pédagogique, Directeur de formation, Intervenant, Coordinateur) est un professionnel en activité ("other_pro" ou "alumni"), JAMAIS un étudiant.
+
+    3. "alumni" (Réseau Alumni / Même établissement) :
+       - Personne issue du même établissement ou réseau académique que le candidat (${candidateProfile.currentSituation || "IUT Clermont Auvergne / Université Clermont Auvergne / IAE"}).
+       - Le statut Alumni est un lien de connexion fort. Leur intitulé de poste ("normalizedJobTitle") doit toujours refléter leur métier professionnel réel.
+
+    4. "sector_pro" (Professionnel du secteur cible) :
+       - Professionnel exerçant dans les métiers ou entreprises cibles : Banque, Gestion de patrimoine (CGP, Banque Privée), Finance de marché ou d'entreprise, FinTech, Assurance, Private Equity, Audit.
+       - Exemples : Conseiller bancaire, Gestionnaire de patrimoine, Analyste financier, Chargé d'affaires entreprises, Banquier privé, Courtier, etc.
+
+    5. "other_pro" (Professionnel hors secteur cible) :
+       - Professionnel en activité dans un autre secteur (Enseignement supérieur, Marketing, IT, Industrie, Commerce, Santé, Direction hors finance).
+
+    6. "other" (Autre) :
+       - Si les informations sont insuffisantes ou incertaines. NE JAMAIS DEVINER.
 
     Score de pertinence (0 à 100) :
-    - Alumni même école : 88-98
-    - Recruteur RH banque/finance : 85-95
-    - Pro secteur cible : 75-90
-    - Étudiant même filière : 60-75
-    - Pro autre secteur : 45-60
+    - Alumni en poste dans le secteur cible : 92-98
+    - Recruteur RH en Banque / Finance : 90-96
+    - Professionnel du secteur cible : 80-90
+    - Alumni dans un autre secteur : 85-92
+    - Recruteur RH autre secteur : 75-85
+    - Étudiant dans la même filière : 60-75
+    - Professionnel autre secteur : 45-60
+    - Autre / non déterminé : 30-45
 
     Points de connexion (connectionPoints) :
-    - Liste courte de 1 à 3 points concrets et valorisants (ex: "Alumni IUT Clermont Auvergne", "Recruteur RH chez Crédit Agricole", "Expertise Gestion de Patrimoine").
+    - 1 à 3 points synthétiques et précis (ex: "Alumni IUT Clermont Auvergne", "Recruteur RH chez Crédit Agricole", "Expertise Gestion de Patrimoine", "Responsable pédagogique UCA").
 
     Format JSON attendu :
     [
       {
         "fullName": "Nom exact",
-        "normalizedJobTitle": "Intitulé de poste professionnel clair",
+        "normalizedJobTitle": "Intitulé de poste professionnel clarifié",
         "category": "recruiter | alumni | student | sector_pro | other_pro | other",
-        "relevanceScore": 90,
+        "relevanceScore": 88,
         "connectionPoints": ["Point 1", "Point 2"],
-        "academicPath": "Parcours académique abrégé si identifiable",
+        "academicPath": "Établissement si identifiable ou vide",
         "previousCompanies": []
       }
     ]
@@ -295,9 +362,8 @@ export async function analyzeLinkedInContacts(
       const text = response.text || "[]";
       const parsed = JSON.parse(text);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Ensure every contact is properly shaped
         return rawContacts.map((c, idx) => {
-          const match = parsed[idx] || parsed.find(p => p.fullName === c.fullName);
+          const match = parsed[idx] || parsed.find((p: any) => p.fullName === c.fullName);
           if (match) {
             return {
               fullName: match.fullName || c.fullName,

@@ -139,6 +139,15 @@ class DBStore {
   async initializeForUser(userId: string, email?: string | null, displayName?: string | null) {
     this.currentUserId = userId;
     try {
+      // Check local storage first to prevent any loss of locally imported items
+      const localContactsKey = `nacora_${userId}_contacts`;
+      const localContactsRaw = localStorage.getItem(localContactsKey) || localStorage.getItem("nacora_contacts");
+      const cachedContacts: Contact[] = localContactsRaw ? filterOutDemoData<Contact>(JSON.parse(localContactsRaw)) : [];
+
+      const localOppsKey = `nacora_${userId}_opportunities`;
+      const localOppsRaw = localStorage.getItem(localOppsKey) || localStorage.getItem("nacora_opportunities");
+      const cachedOpps: Opportunity[] = localOppsRaw ? filterOutDemoData<Opportunity>(JSON.parse(localOppsRaw)) : [];
+
       // 1. Try to load from Firestore document
       const userRef = doc(db, "users", userId);
       const snapshot = await getDoc(userRef);
@@ -150,10 +159,37 @@ class DBStore {
           this.profile = createDefaultProfile(userId, email || "", displayName || "");
         }
         
-        this.opportunities = filterOutDemoData(data.opportunities);
-        this.contacts = filterOutDemoData(data.contacts);
-        this.companies = filterOutDemoData(data.companies);
-        this.calendarEvents = filterOutDemoData(data.calendarEvents);
+        const remoteOpps: Opportunity[] = filterOutDemoData<Opportunity>(data.opportunities);
+        const remoteContacts: Contact[] = filterOutDemoData<Contact>(data.contacts);
+        const remoteCompanies: Company[] = filterOutDemoData<Company>(data.companies);
+        const remoteCalendar: CalendarEvent[] = filterOutDemoData<CalendarEvent>(data.calendarEvents);
+
+        // Non-destructive merge between remote and cached local contacts
+        const mergedContacts: Contact[] = [...remoteContacts];
+        const seenContactIds = new Set(remoteContacts.map(c => c.id));
+        const seenContactNames = new Set(remoteContacts.map(c => (c.fullName || "").toLowerCase().trim()));
+        for (const localC of cachedContacts) {
+          if (localC && localC.id && !seenContactIds.has(localC.id) && !seenContactNames.has((localC.fullName || "").toLowerCase().trim())) {
+            mergedContacts.push(localC);
+            seenContactIds.add(localC.id);
+            seenContactNames.add((localC.fullName || "").toLowerCase().trim());
+          }
+        }
+        this.contacts = mergedContacts;
+
+        // Non-destructive merge for opportunities
+        const mergedOpps: Opportunity[] = [...remoteOpps];
+        const seenOppIds = new Set(remoteOpps.map(o => o.id));
+        for (const localO of cachedOpps) {
+          if (localO && localO.id && !seenOppIds.has(localO.id)) {
+            mergedOpps.push(localO);
+            seenOppIds.add(localO.id);
+          }
+        }
+        this.opportunities = mergedOpps;
+
+        this.companies = remoteCompanies;
+        this.calendarEvents = remoteCalendar;
         this.documents = data.documents || [];
         this.chatSessions = data.chatSessions || INITIAL_SESSIONS;
       } else {
@@ -164,8 +200,8 @@ class DBStore {
         } else {
           // 3. Brand new account: initialize clean profile with empty collections
           this.profile = createDefaultProfile(userId, email || "", displayName || "");
-          this.opportunities = [];
-          this.contacts = [];
+          this.opportunities = cachedOpps;
+          this.contacts = cachedContacts;
           this.companies = [];
           this.calendarEvents = [];
           this.documents = [];
