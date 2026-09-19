@@ -194,7 +194,15 @@ async function startServer() {
             payload.format
           )});
         case "chat":
-          return res.json({ response: await handlePersonaChat(payload.personaId, payload.messages, payload.profile) });
+          return res.json({ 
+            response: await handlePersonaChat(
+              payload.personaId, 
+              payload.messages, 
+              payload.profile, 
+              payload.activeFocus, 
+              payload.contextSummary
+            ) 
+          });
         default:
           return res.status(400).json({ error: `Unknown action: ${action}` });
       }

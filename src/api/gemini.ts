@@ -4,6 +4,12 @@ import { ExtractedJobInfo, CandidateProfile, ContactCategory } from "../types.ts
 // Lazy-initialize Gemini AI to prevent startup crashes if key is missing
 let aiClient: GoogleGenAI | null = null;
 
+export const CASCADE_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-flash-latest"
+];
+
 function getAi(): GoogleGenAI {
   if (!aiClient) {
     const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
@@ -80,16 +86,23 @@ export async function extractJobDetails(jobDescription: string): Promise<Extract
       ${jobDescription}
     `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.8-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
+    for (const model of CASCADE_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+          },
+        });
 
-    const text = response.text || "{}";
-    return JSON.parse(text) as ExtractedJobInfo;
+        const text = response.text || "{}";
+        return JSON.parse(text) as ExtractedJobInfo;
+      } catch (err: any) {
+        console.info(`[extractJobDetails] Modèle ${model} indisponible, passage au suivant.`);
+      }
+    }
+    throw new Error("All models failed for extractJobDetails");
   } catch (error) {
     console.error("Error in extractJobDetails:", error);
     // Return sensible fallback to ensure no app crash
@@ -335,12 +348,6 @@ export async function analyzeLinkedInContacts(
     ${JSON.stringify(rawContacts)}
   `;
 
-  const modelCascade = [
-    "gemini-3.8-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-flash-latest"
-  ];
-
   let ai: GoogleGenAI;
   try {
     ai = getAi();
@@ -348,7 +355,7 @@ export async function analyzeLinkedInContacts(
     return analyzeWithHeuristics(rawContacts, candidateProfile);
   }
 
-  for (const modelName of modelCascade) {
+  for (const modelName of CASCADE_MODELS) {
     try {
       const response = await ai.models.generateContent({
         model: modelName,
@@ -396,12 +403,6 @@ export async function analyzeLinkedInContacts(
   // If all models failed, use deterministic heuristic engine
   return analyzeWithHeuristics(rawContacts, candidateProfile);
 }
-
-const CASCADE_MODELS = [
-  "gemini-3.8-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-flash-latest"
-];
 
 /**
  * Deterministic fallback generator when Gemini API is under high demand (503 / 429) or unavailable.
@@ -490,7 +491,7 @@ export async function generateOutreachMessage(
           return response.text.trim();
         }
       } catch (err: any) {
-        console.warn(`[generateOutreachMessage] Model ${model} failed, trying cascade:`, err?.message || err);
+        console.info(`[generateOutreachMessage] Modèle ${model} indisponible, passage au suivant.`);
       }
     }
 
@@ -502,77 +503,317 @@ export async function generateOutreachMessage(
 }
 
 /**
- * Handles chat interactions with different assistant personas.
+ * Generates an intelligent, tailored fallback response when AI models are unavailable or rate limited.
+ */
+function generatePersonaFallback(
+  personaId: string,
+  userMessage: string,
+  candidateProfile: CandidateProfile,
+  activeFocus?: { type: string; title: string; subtitle?: string; detail?: string }
+): string {
+  const query = userMessage.toLowerCase();
+  const name = candidateProfile.fullName ? candidateProfile.fullName.split(" ")[0] : "Candidat";
+  const situation = candidateProfile.currentSituation || "Étudiant en Banque / Finance";
+  const currentExp = candidateProfile.currentAlternance || "Expérience professionnelle";
+  const targetMaster = (candidateProfile.targetMasters || ["Banque / Finance"]).join(" / ");
+  const skillsList = (candidateProfile.skills || ["Analyse financière", "Gestion de patrimoine", "Relation client"]).join(", ");
+
+  // 1. Accroche CV / Rédiger profil
+  if (query.includes("accroche") || query.includes("profil") || query.includes("présentation cv")) {
+    return `Voici une proposition d'accroche de CV impactante et personnalisée pour ton profil :
+
+**Accroche recommandée :**
+« **${situation}** actuellement chez **${currentExp}**, je prépare activement l'intégration d'un Master en **${targetMaster}**. Fort de mes compétences en **${skillsList}**, je souhaite mettre ma rigueur d'analyse et ma réactivité au service de vos équipes. »
+
+**Points forts de cette accroche :**
+• **Lisibilité immédiate** : Ton niveau actuel et ton projet académique sont clairs dès les 3 premières secondes.
+• **Mise en valeur opérationnelle** : Valorisation de ton entreprise actuelle et de tes compétences clés.
+• **Posture professionnelle** : Ton adapté aux exigences de la Banque, de la Finance et de la Gestion de Patrimoine.
+
+[ACTIONS: "Adapter cette accroche à une offre" | "Structurer les compétences du CV"]`;
+  }
+
+  // 2. Adapter CV à une fiche de poste / offre
+  if (query.includes("adapter") || query.includes("fiche de poste") || query.includes("offre")) {
+    const focusTitle = activeFocus?.title || "l'opportunité sélectionnée";
+    return `Voici la méthodologie pas à pas pour adapter parfaitement ton CV à **${focusTitle}** :
+
+1. **Intituler précisément ton profil** : Aligne l'intitulé exact au sommet de ton CV avec le titre du poste visé (*${focusTitle}*).
+2. **Harmoniser les mots-clés techniques** : Reprends les termes clés de l'offre (**${skillsList}**) dans la description de tes expériences chez **${currentExp}**.
+3. **Chiffrer tes réalisations** : Mets en avant des données concrètes de tes missions précédentes chez **${currentExp}**.
+4. **Cohérence du parcours** : Souligne la suite logique avec ton projet de Master en **${targetMaster}**.
+
+[ACTIONS: "Rédiger l'accroche CV" | "Préparer l'entretien pour ce poste"]`;
+  }
+
+  // 3. Entretien / Simulation / STAR
+  if (query.includes("entretien") || query.includes("star") || query.includes("simulation") || query.includes("question")) {
+    return `Très bien ! Préparons ton entretien avec la **méthode STAR** (Situation, Tâche, Action, Résultat).
+
+**Mise en situation conseillée :**
+*« Peux-tu me présenter une situation professionnelle récente chez ${currentExp} où tu as dû résoudre un problème complexe ou gérer une situation délicate avec un client ou un collaborateur ? »*
+
+**Structure attendue pour ta réponse :**
+• **S**ituation : Le contexte chez **${currentExp}**.
+• **T**âche : L'objectif ou le problème à résoudre.
+• **A**ction : Ce que TU as fait concrètement (compétences mobilisées : **${skillsList}**).
+• **R**ésultat : L'impact mesurable ou l'enseignement retenu.
+
+[ACTIONS: "Exemple de réponse STAR" | "Questions pièges fréquentes"]`;
+  }
+
+  // 4. Networking / Message d'approche
+  if (query.includes("message") || query.includes("linkedin") || query.includes("contact") || query.includes("réseau") || query.includes("alumni")) {
+    const focusTitle = activeFocus?.title || "mon secteur d'intérêt";
+    return `Voici un modèle de message d'approche LinkedIn percutant et professionnel :
+
+**Message proposé :**
+« Bonjour,
+
+Actuellement **${situation}** et préparant un Master en **${targetMaster}**, je suis avec attention les activités de votre organisation. Votre parcours et votre expertise sur **${focusTitle}** retiennent tout particulièrement mon attention.
+
+Seriez-vous disposé(e) à m'accorder un court échange de 10 minutes pour me faire part de votre retour d'expérience ?
+
+En vous remerciant vivement pour votre temps.
+
+Bien cordialement,
+**${candidateProfile.fullName || name}** »
+
+[ACTIONS: "Personnaliser pour un Alumni" | "Message de relance"]`;
+  }
+
+  // 5. Négociation / Salaire
+  if (query.includes("salaire") || query.includes("négocier") || query.includes("package") || query.includes("remunération")) {
+    return `Pour aborder la négociation de ta rémunération avec sérénité :
+
+**Repères pour ton profil :**
+• **Gratification / Salaire** : En alternance/stage, les grilles conventionnelles de la banque/finance prévoient des barèmes basés sur l'âge et le niveau d'études (Master **${targetMaster}**).
+• **Éléments du package global** : Ne négocie pas seulement le fixe ! Pense aux titres-restaurant, à la prise en charge des transports, au variable et à l'intéressement.
+
+**Formulation recommandée en entretien :**
+« Compte tenu de mon expérience pratique chez **${currentExp}** et de la maîtrise de compétences comme **${skillsList}**, j'aimerais échanger sur la possibilité d'adapter la rémunération globale proposée. »
+
+[ACTIONS: "Calculer mon salaire net estimé" | "Formulation pour un email de réponse"]`;
+  }
+
+  // 6. Generic intelligent response based on persona
+  if (personaId === "interview") {
+    return `En tant que **Coach Entretien NACORA**, je suis prêt pour ton entraînement.
+
+Souhaites-tu simuler un entretien pour un poste précis (**${activeFocus?.title || "Banque / Finance"}**), travailler la méthode STAR ou réviser les questions de présentation ?
+
+[ACTIONS: "Lancer une simulation de 5 min" | "Questions techniques fréquentes"]`;
+  }
+
+  if (personaId === "cv_letter") {
+    return `En tant qu'**Expert CV & Lettres NACORA**, je peux t'aider à optimiser tes candidatures.
+
+Compte tenu de ta situation (**${situation}**) et de ton objectif de Master (**${targetMaster}**), sur quoi souhaites-tu travailler ?
+
+[ACTIONS: "Rédiger mon accroche CV" | "Adapter mon CV à une offre" | "Revoir la lettre de motivation"]`;
+  }
+
+  if (personaId === "networking") {
+    return `En tant que **Stratège Réseau NACORA**, je t'aide à contacter les bonnes personnes (Alumni, Recruteurs RH, Managers).
+
+Souhaites-tu rédiger une note d'invitation LinkedIn, un message InMail ou préparer une démarche auprès des anciens élèves de ta formation ?
+
+[ACTIONS: "Rédiger une invitation LinkedIn" | "Message d'approche Alumni"]`;
+  }
+
+  if (personaId === "negotiation") {
+    return `En tant qu'**Expert Négociation Salaire NACORA**, je t'accompagne pour valoriser ton package.
+
+Souhaites-tu évaluer une offre de rémunération, analyser les avantages conventionnels ou préparer tes arguments ?
+
+[ACTIONS: "Analyser une offre salariale" | "Arguments de négociation"]`;
+  }
+
+  return `En tant que **Conseiller Carrière NACORA**, je t'accompagne dans la structuration de ta recherche.
+
+Rappel de tes objectifs :
+• **Situation** : ${situation} (expérience chez ${currentExp})
+• **Objectif** : Master en ${targetMaster}
+• **Compétences clés** : ${skillsList}
+
+Comment puis-je t'aider aujourd'hui ?
+
+[ACTIONS: "Analyser l'adéquation de mon profil" | "Définir mon plan d'action de la semaine"]`;
+}
+
+/**
+ * Handles chat interactions with different assistant personas enriched with full NACORA context.
  */
 export async function handlePersonaChat(
   personaId: string,
   messages: Array<{ role: 'user' | 'model'; text: string }>,
-  candidateProfile: CandidateProfile
+  candidateProfile: CandidateProfile,
+  activeFocus?: { type: string; title: string; subtitle?: string; detail?: string },
+  contextSummary?: {
+    opportunitiesCount?: number;
+    contactsCount?: number;
+    companiesCount?: number;
+    calendarEventsCount?: number;
+    documentsCount?: number;
+    opportunities?: Array<{ title: string; company: string; status: string; location?: string; salary?: string; keyMissions?: string[] }>;
+    contacts?: Array<{ name: string; job: string; company: string; category: string; connectionPoints?: string[] }>;
+    companies?: Array<{ name: string; sector?: string }>;
+    calendarEvents?: Array<{ title: string; date: string; type: string }>;
+    documents?: Array<{ title: string; type: string }>;
+  }
 ): Promise<string> {
   try {
     const ai = getAi();
-    
-    // Define the system instructions based on the selected persona
-    let systemInstruction = "";
+
+    // 1. Compile active focus prompt block if present
+    let activeFocusBlock = "";
+    if (activeFocus && activeFocus.title) {
+      activeFocusBlock = `
+=== SUJET D'ÉTUDE ACTIF (CONTEXTE PRIORITAIRE DE LA DISCUSSION) ===
+- Type d'élément : ${activeFocus.type || "Général"}
+- Intitulé / Nom : ${activeFocus.title}
+${activeFocus.subtitle ? `- Sous-titre / Organisation : ${activeFocus.subtitle}` : ""}
+${activeFocus.detail ? `- Détails & Données : ${activeFocus.detail}` : ""}
+===================================================================
+`;
+    }
+
+    // 2. Compile broader NACORA database context summary block
+    let nacoraContextBlock = "";
+    if (contextSummary) {
+      const oppsStr = (contextSummary.opportunities || [])
+        .map(o => `  * ${o.title} chez ${o.company} (Statut: ${o.status}${o.location ? `, Lieu: ${o.location}` : ""}${o.salary ? `, Gratification/Salaire: ${o.salary}` : ""})`)
+        .join("\n");
+
+      const contactsStr = (contextSummary.contacts || [])
+        .slice(0, 8)
+        .map(c => `  * ${c.name} - ${c.job} chez ${c.company} [${c.category}] (Lien: ${(c.connectionPoints || []).join(" | ") || "Réseau"})`)
+        .join("\n");
+
+      const eventsStr = (contextSummary.calendarEvents || [])
+        .slice(0, 5)
+        .map(e => `  * ${e.date} : ${e.title} (${e.type})`)
+        .join("\n");
+
+      const docsStr = (contextSummary.documents || [])
+        .map(d => `  * ${d.title} (${d.type})`)
+        .join("\n");
+
+      nacoraContextBlock = `
+=== BASE DE DONNÉES NACORA DU CANDIDAT (CONTEXTE SÉLECTIF DISPONIBLE) ===
+- Profil : ${candidateProfile.fullName || "Candidat"} (${candidateProfile.currentSituation || "En formation"})
+- Alternance / Postes actuels : ${candidateProfile.currentAlternance || "Aucune actuellement"}
+- Masters ciblés : ${(candidateProfile.targetMasters || []).join(", ")}
+- Compétences clés : ${(candidateProfile.skills || []).join(", ")}
+
+- Opportunités en cours (${contextSummary.opportunitiesCount || 0}) :
+${oppsStr || "  * Aucune opportunité enregistrée"}
+
+- Contacts réseau (${contextSummary.contactsCount || 0}) :
+${contactsStr || "  * Aucun contact réseau enregistré"}
+
+- Échéances calendrier (${contextSummary.calendarEventsCount || 0}) :
+${eventsStr || "  * Aucune échéance à venir"}
+
+- Documents disponibles (${contextSummary.documentsCount || 0}) :
+${docsStr || "  * Aucun document"}
+====================================================================
+`;
+    }
+
+    // 3. Define the system instructions based on the selected persona
+    let specialistRole = "";
+    let specialistInstructions = "";
+
     switch (personaId) {
       case "general":
-        systemInstruction = `
-          Tu es le Conseiller Carrière Général de NACORA. Ton but est de conseiller le candidat sur sa recherche d'alternance/emploi, d'optimiser ses choix de formation et de l'aider à construire sa stratégie de carrière.
-          Le candidat s'appelle ${candidateProfile.fullName}.
-          Sa situation actuelle : ${candidateProfile.currentSituation}.
-          Son alternance actuelle : ${candidateProfile.currentAlternance}.
-          Ses objectifs de master : ${candidateProfile.targetMasters.join(", ")}.
-          Ses compétences : ${candidateProfile.skills.join(", ")}.
+        specialistRole = "Conseiller Carrière NACORA";
+        specialistInstructions = `
+Tu es le Conseiller Carrière de NACORA, plateforme d'accélération de carrière en Banque, Finance, Gestion de Patrimoine et FinTech.
+Ton rôle est d'aider le candidat à :
+- Structurer sa recherche d'alternance, de stage ou de premier emploi.
+- Comparer et prioriser les opportunités dans sa base NACORA.
+- Analyser les écarts entre son profil actuel (${candidateProfile.currentSituation || "étudiant"}) et les exigences des offres visées.
+- Donner des conseils stratégiques concrets et un plan d'action étape par étape.
+`;
+        break;
 
-          Sois pragmatique, donne des conseils d'expert en recrutement, et adopte un ton encourageant et professionnel. Reste concis et structuré dans tes réponses.
-        `;
-        break;
       case "interview":
-        systemInstruction = `
-          Tu es le Coach d'Entretien d'Embauche de NACORA. Ton but est de simuler des entretiens et d'enseigner la méthode STAR (Situation, Tâche, Action, Résultat).
-          Le candidat s'appelle ${candidateProfile.fullName || "le candidat"}.
-          Sa situation : ${candidateProfile.currentSituation || "en recherche"}.
-          Son expérience (${candidateProfile.currentAlternance || "expérience passée"}) et ses compétences (${candidateProfile.skills.join(", ") || "compétences clés"}) sont des atouts majeurs à valoriser.
-          
-          Tu peux proposer des questions d'entretien courantes dans la banque/finance/fintech et évaluer ses réponses en lui donnant un feedback constructif.
-        `;
+        specialistRole = "Coach Entretien NACORA";
+        specialistInstructions = `
+Tu es le Coach d'Entretien de NACORA, expert en entraînement aux entretiens du secteur bancaire, financier et des grandes entreprises.
+Ton rôle est de :
+- Simuler des entretiens de recrutement réalistes (mises en situation, questions comportementales et techniques).
+- Poser UNE question précise à la fois et attendre la réponse du candidat pour évaluer sa méthode STAR (Situation, Tâche, Action, Résultat).
+- Donner un feedback constructif, bienveillant et chiffré sur ses réponses.
+- Adapter les questions au poste, à l'entreprise ou à l'opportunité active en contexte.
+`;
         break;
+
       case "cv_letter":
-        systemInstruction = `
-          Tu es l'Expert CV & Lettres de NACORA. Ton but est d'aider à concevoir et d'optimiser des CV conformes aux filtres ATS, de rédiger des lettres de motivation percutantes en utilisant des verbes d'action forts et des accroches convaincantes.
-          Le candidat s'appelle ${candidateProfile.fullName || "le candidat"}.
-          Tu connais son profil : ${candidateProfile.currentSituation || "étudiant"}, alternance/poste : ${candidateProfile.currentAlternance || "non renseigné"}, compétences : ${candidateProfile.skills.join(", ") || "non renseignées"}.
-          
-          Donne des conseils de mise en page, de formulation de phrases clés d'accroche et d'ajustement du CV par rapport aux offres visées.
-        `;
+        specialistRole = "Expert CV & Lettres NACORA";
+        specialistInstructions = `
+Tu es l'Expert CV & Lettres de NACORA, spécialiste de l'optimisation ATS et de la rédaction à fort impact.
+Ton rôle est de :
+- Analyser le CV et les lettres de motivation du candidat ou les offres ciblées.
+- Identifier les mots-clés techniques indispensables et verbes d'action.
+- Proposer des accroches percutantes, des formulations synthétiques et convaincantes.
+- Proposer des améliorations directes de phrases ou des paragraphes prêts à l'emploi.
+`;
         break;
+
       case "networking":
-        systemInstruction = `
-          Tu es le Stratège de Recherche & Réseau de NACORA. Ton rôle est de conseiller le candidat sur la prospection LinkedIn, l'approche du marché caché de l'emploi, et l'établissement de contacts clés (notamment avec les Alumni de son établissement).
-          Candidat : ${candidateProfile.fullName || "le candidat"}.
-          Situation : ${candidateProfile.currentSituation || "en études"}.
-          
-          Donne des modèles de messages, des techniques pour obtenir des entretiens d'information et des stratégies de suivi de réseau.
-        `;
+        specialistRole = "Stratège Réseau NACORA";
+        specialistInstructions = `
+Tu es le Stratège Réseau & LinkedIn de NACORA, expert en prospection professionnelle et marché caché.
+Ton rôle est de :
+- Analyser le réseau de contacts du candidat (Alumni, Recruteurs, Professionnels du secteur).
+- Identifier les meilleures personnes à contacter dans la base NACORA par rapport à une entreprise ou offre ciblée.
+- Rédiger des messages d'approche LinkedIn percutants et personnalisés en exploitant les points de connexion (Alumni, même ville, même groupe).
+- Donner des conseils sur le suivi des échanges et l'obtention d'entretiens d'information.
+`;
         break;
+
       case "negotiation":
-        systemInstruction = `
-          Tu es l'Expert en Négociation Salariale de NACORA. Ton rôle est de préparer le candidat à aborder la rémunération lors des entretiens d'alternance, de stage ou de premier emploi, en s'appuyant sur les grilles, la valeur ajoutée et les techniques de négociation bienveillante.
-          Candidat : ${candidateProfile.fullName || "le candidat"}.
-          Alternance/Poste actuel : ${candidateProfile.currentAlternance || "non renseigné"}.
-          
-          Donne des formulations précises, des arguments concrets de valeur, et des conseils pour évaluer un package global (fixe, primes, avantages).
-        `;
+        specialistRole = "Négociation Salaire NACORA";
+        specialistInstructions = `
+Tu es l'Expert en Négociation Salariale de NACORA, spécialiste des packages de rémunération en banque, finance et gestion de patrimoine.
+Ton rôle est de :
+- Analyser les propositions de salaire, gratifications d'alternance/stage et packages globaux (fixe, variable, primes conventionnelles, titres-restaurant, transports, intéressement).
+- Préparer des arguments de valeur factuels basés sur les grilles du secteur et les compétences du candidat.
+- Fournir les formulations exactes à utiliser en entretien ou par email.
+- Simuler la négociation avec un recruteur.
+`;
         break;
+
       default:
-        systemInstruction = `Tu es NACORA AI, un assistant d'accélération de carrière intelligent. Aide le candidat ${candidateProfile.fullName} dans ses démarches de recrutement.`;
+        specialistRole = "Conseiller Carrière NACORA";
+        specialistInstructions = "Tu es le Conseiller Carrière de NACORA. Accompagne le candidat avec expertise et concision.";
     }
+
+    const systemInstruction = `
+${specialistInstructions}
+
+${activeFocusBlock}
+
+${nacoraContextBlock}
+
+Directives de réponse :
+- Tu t'adresses directement à ${candidateProfile.fullName || "le candidat"}.
+- Sois synthétique, structuré (puces, gras, paragraphes aérés), professionnel et pragmatique.
+- Si un sujet actif (offre, contact, etc.) est fourni en contexte, fais-y directement référence.
+- N'invente pas de fausses données d'entreprise non présentes dans le contexte.
+- À la toute fin de ta réponse, si pertinent, tu peux suggérer 2 à 3 actions rapides au format strict suivant sur une nouvelle ligne :
+  [ACTIONS: "Libellé action 1" | "Libellé action 2"]
+`;
 
     // Standardize and compile chat history
     const geminiHistory = messages.map(msg => ({
       role: msg.role === 'model' ? 'model' : 'user',
       parts: [{ text: msg.text }]
     }));
+
+    const lastUserMsg = messages.filter(m => m.role === 'user').slice(-1)[0]?.text || "";
 
     for (const model of CASCADE_MODELS) {
       try {
@@ -588,13 +829,19 @@ export async function handlePersonaChat(
           return response.text;
         }
       } catch (err: any) {
-        console.warn(`[handlePersonaChat] Model ${model} error, trying cascade:`, err?.message || err);
+        const msg = err?.message || String(err);
+        if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota exceeded")) {
+          console.info(`[handlePersonaChat] Quota atteint pour le modèle ${model}, passage au modèle suivant.`);
+        } else {
+          console.info(`[handlePersonaChat] Indisponibilité du modèle ${model}, passage au modèle suivant.`);
+        }
       }
     }
 
-    return "Je suis à votre écoute pour optimiser vos candidatures et préparer vos entretiens. N'hésitez pas à reformuler votre question ou préciser votre besoin.";
+    return generatePersonaFallback(personaId, lastUserMsg, candidateProfile, activeFocus);
   } catch (error) {
     console.error("Error in handlePersonaChat:", error);
-    return "Je suis à votre écoute pour optimiser vos candidatures et préparer vos entretiens. N'hésitez pas à reformuler votre question ou préciser votre besoin.";
+    const lastUserMsg = messages.filter(m => m.role === 'user').slice(-1)[0]?.text || "";
+    return generatePersonaFallback(personaId, lastUserMsg, candidateProfile, activeFocus);
   }
 }

@@ -142,23 +142,59 @@ export default function App() {
     { id: "negotiation", label: "Négociation Salaire", icon: <MessageSquare className="w-4 h-4 text-[#f87171]" /> }
   ];
 
+  // Active view helper for top bar title & icon
+  const activeViewInfo = (() => {
+    switch (currentView) {
+      case "accueil": return { label: "Accueil", icon: <HomeIcon className="w-4 h-4 text-[#FF6685]" /> };
+      case "opportunities": return { label: "Opportunités", icon: <Briefcase className="w-4 h-4 text-[#38BDF8]" /> };
+      case "calendrier": return { label: "Calendrier", icon: <CalendarIcon className="w-4 h-4 text-[#FBBF24]" /> };
+      case "documents": return { label: "Documents & CV", icon: <FileText className="w-4 h-4 text-[#34D399]" /> };
+      case "contacts": return { label: "Contacts & Réseau", icon: <Users className="w-4 h-4 text-[#C084FC]" /> };
+      case "entreprises": return { label: "Entreprises Cibles", icon: <Building2 className="w-4 h-4 text-[#F87171]" /> };
+      case "hub_ia": return { label: "Hub IA Carrière", icon: <Sparkles className="w-4 h-4 text-[#C084FC]" /> };
+      case "profile": return { label: "Profil Candidat", icon: <User className="w-4 h-4 text-[#FF6685]" /> };
+      default: return { label: "Tableau de bord", icon: <Compass className="w-4 h-4 text-[#38BDF8]" /> };
+    }
+  })();
+
   return (
     <div className="relative min-h-screen text-[#F5F6FA] flex overflow-hidden font-sans">
       
-      {/* 2. Responsive mobile navigation top bar */}
-      <header className="fixed top-0 left-0 right-0 h-16 glass-header z-40 flex items-center justify-between px-6 lg:hidden">
+      {/* 2. Responsive mobile navigation top bar (Only visible on mobile/tablet < lg) */}
+      <header className="fixed top-0 left-0 right-0 h-14 glass-header z-40 flex items-center justify-between px-4 sm:px-6 lg:hidden">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#D81A45] to-[#FF1A55] flex items-center justify-center font-extrabold text-white text-base shadow-[0_0_18px_rgba(216,26,69,0.5)]">
-            N
+          <button 
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-2 rounded-xl bg-white/5 text-[#9AA0B2] hover:text-[#F5F6FA] border border-white/10 hover:border-white/20 transition-all cursor-pointer flex items-center justify-center"
+            title="Menu de navigation"
+          >
+            {sidebarOpen ? <X className="w-5 h-5 text-[#FF6685]" /> : <Menu className="w-5 h-5 text-[#F5F6FA]" />}
+          </button>
+
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-[#D81A45] to-[#FF1A55] flex items-center justify-center font-extrabold text-white text-sm shadow-[0_0_14px_rgba(216,26,69,0.5)]">
+              N
+            </div>
+            <span className="text-base font-black text-[#F5F6FA] tracking-wider font-display">NACORA</span>
           </div>
-          <span className="text-lg font-black text-[#F5F6FA] tracking-wider font-display">NACORA</span>
+
+          <div className="h-4 w-px bg-white/10 mx-1 hidden sm:block" />
+
+          <span className="text-xs font-semibold text-[#9AA0B2] hidden sm:flex items-center gap-1.5">
+            {activeViewInfo.icon}
+            <span>{activeViewInfo.label}</span>
+          </span>
         </div>
-        <button 
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="p-2 rounded-xl bg-white/5 text-[#9AA0B2] hover:text-[#F5F6FA] border border-white/10 cursor-pointer"
+
+        <div 
+          onClick={() => handleNavigate("profile")}
+          className="flex items-center gap-2 cursor-pointer p-1 rounded-xl hover:bg-white/5 transition-colors"
+          title="Mon profil"
         >
-          {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
+          <div className="w-8 h-8 rounded-xl bg-[rgba(216,26,69,0.15)] border border-[rgba(216,26,69,0.3)] text-[#FF6685] font-bold text-xs flex items-center justify-center shadow-[0_0_10px_rgba(216,26,69,0.2)]">
+            {userInitials}
+          </div>
+        </div>
       </header>
 
       {/* 3. Global Sidebar (Retractable Icon Dock collapsed by default, expands on hover) */}
@@ -297,51 +333,78 @@ export default function App() {
       </aside>
 
       {/* 4. Main Workspace (Scrollable Right Side, dynamically reclaiming space) */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto h-screen z-10 pt-16 lg:pt-0 pb-6 lg:pl-[72px] transition-all duration-300">
+      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto h-screen z-10 pt-14 lg:pt-0 pb-6 lg:pl-[72px] transition-all duration-300">
         
-        {/* Top bar with global actions & search input */}
-        <header className="h-14 glass-header px-4 lg:px-6 flex items-center justify-between gap-4 sticky top-0 z-30">
+        {/* Harmonized Top bar (Desktop Only >= lg) */}
+        <header className="hidden lg:flex h-14 glass-header px-6 items-center justify-between gap-6 sticky top-0 z-30 shrink-0">
           
-          {/* Global search input */}
-          <div className="relative max-w-md w-full hidden md:block">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9AA0B2]" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Rechercher une offre, un contact, un lieu..."
-              className="w-full glass-input pl-9 pr-4 py-1.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
-            />
+          {/* Left section: Active View Context & Global Search Bar */}
+          <div className="flex items-center gap-5 flex-1 max-w-2xl">
+            {/* View Breadcrumb / Badge */}
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10 shrink-0">
+              {activeViewInfo.icon}
+              <span className="text-xs font-bold text-[#F5F6FA] whitespace-nowrap font-display">{activeViewInfo.label}</span>
+            </div>
+
+            <div className="h-4 w-px bg-white/10 shrink-0" />
+
+            {/* Global Search Input with ⌘K shortcut */}
+            <div className="relative w-full max-w-md">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#9AA0B2]" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Rechercher une offre, un contact, un document..."
+                className="w-full glass-input pl-9 pr-12 py-1.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60 focus:border-[#D81A45]/50 transition-all"
+              />
+              <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono font-semibold text-[#9AA0B2]/70 px-1.5 py-0.5 bg-white/5 border border-white/10 rounded-md pointer-events-none select-none">
+                ⌘K
+              </kbd>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 ml-auto">
-            {/* Display active targeting badge */}
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 glass-pill bg-white/[0.04] text-[#9AA0B2]">
-              <GraduationCap className="w-3.5 h-3.5 text-[#38BDF8]" />
-              <span className="text-[10px] font-semibold text-[#9AA0B2]">
+          {/* Right section: Status indicators & Profile user card */}
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Candidate Space Status Pill */}
+            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.03] border border-white/10 text-[#9AA0B2]">
+              <span className="w-2 h-2 rounded-full bg-[#38BDF8] animate-pulse" />
+              <span className="text-[11px] font-semibold text-[#F5F6FA]">
                 {profile.currentAlternance ? `Alternance : ${profile.currentAlternance}` : "Espace Candidat"}
               </span>
             </div>
-            
-            <button 
-              onClick={() => handleNavigate("profile")}
-              className="flex items-center gap-2 cursor-pointer p-1 rounded-xl hover:bg-white/5 transition-colors"
-            >
-              <span className="text-xs font-semibold text-[#9AA0B2] hover:text-[#F5F6FA] hidden sm:block truncate max-w-[120px]">
-                {displayName}
-              </span>
-              <div className="w-7 h-7 rounded-full bg-white/5 flex items-center justify-center text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10 border border-white/10 transition-spring">
-                <User className="w-3.5 h-3.5" />
-              </div>
-            </button>
 
-            <button
-              onClick={handleLogout}
-              title="Déconnexion"
-              className="sm:hidden p-1.5 rounded-xl text-[#9AA0B2] hover:text-[#F04438] hover:bg-[rgba(240,68,56,0.12)] transition-colors cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-            </button>
+            {/* AI Status Pill */}
+            <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-full bg-[rgba(192,132,252,0.1)] border border-[rgba(192,132,252,0.25)] text-[#C084FC]">
+              <Sparkles className="w-3 h-3 text-[#C084FC]" />
+              <span className="text-[11px] font-semibold">NACORA AI Active</span>
+            </div>
+
+            <div className="h-4 w-px bg-white/10 mx-0.5" />
+
+            {/* User Profile Card */}
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => handleNavigate("profile")}
+                className="flex items-center gap-2.5 cursor-pointer p-1.5 rounded-xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all group"
+                title="Mon profil candidat"
+              >
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#D81A45]/30 to-[#FF1A55]/20 text-[#FF6685] border border-[#D81A45]/40 flex items-center justify-center font-bold text-xs shadow-[0_0_12px_rgba(216,26,69,0.25)] group-hover:scale-105 transition-transform">
+                  {userInitials}
+                </div>
+                <span className="text-xs font-bold text-[#F5F6FA] group-hover:text-white transition-colors truncate max-w-[130px]">
+                  {displayName}
+                </span>
+              </button>
+
+              <button
+                onClick={handleLogout}
+                title="Se déconnecter"
+                className="p-2 rounded-xl text-[#9AA0B2] hover:text-[#F04438] hover:bg-[rgba(240,68,56,0.12)] border border-transparent hover:border-[rgba(240,68,56,0.2)] transition-all cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </header>
 
