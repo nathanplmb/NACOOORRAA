@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
+import { useLanguage } from "../context/LanguageContext";
 import { 
   dbStore 
 } from "../dbStore";
 import { 
   Opportunity, 
   OpportunityStatus, 
-  ExtractedJobInfo 
+  ExtractedJobInfo,
+  Company
 } from "../types";
 import { 
   Badge, 
@@ -14,6 +16,7 @@ import {
   Modal 
 } from "../components/Shared";
 import { JobExtractionModal } from "../components/JobExtractionModal";
+import { computeOpportunityMatch } from "../api/cvFramework";
 import { 
   Plus, 
   Upload, 
@@ -69,6 +72,7 @@ interface OpportunitiesProps {
 }
 
 export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchTerm }) => {
+  const { language, t } = useLanguage();
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
   const [oppToDelete, setOppToDelete] = useState<Opportunity | null>(null);
@@ -129,12 +133,19 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
     }
   }, [selectedOpp]);
 
+  const [candidateProfile, setCandidateProfile] = useState(dbStore.getProfile());
+  const [candidateDocs, setCandidateDocs] = useState(dbStore.getDocuments());
+
   // Load opportunities from DBStore
   useEffect(() => {
     setOpportunities(dbStore.getOpportunities());
+    setCandidateProfile(dbStore.getProfile());
+    setCandidateDocs(dbStore.getDocuments());
     const unsub = dbStore.subscribe(() => {
       const all = dbStore.getOpportunities();
       setOpportunities(all);
+      setCandidateProfile(dbStore.getProfile());
+      setCandidateDocs(dbStore.getDocuments());
       // Keep selectedOpp in sync
       if (selectedOpp) {
         const fresh = all.find(o => o.id === selectedOpp.id);
@@ -225,35 +236,35 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
   }> = [
     { 
       id: "saved", 
-      title: "Sauvegardée", 
+      title: t.opportunities.saved, 
       color: "text-sky-400", 
       badgeBg: "bg-sky-500/15 text-sky-300 border border-sky-500/30",
       borderActive: "border-sky-400/60 bg-sky-500/[0.04]",
-      desc: "Offres repérées et mises de côté" 
+      desc: language === "en" ? "Tracked & shortlisted offers" : "Offres repérées et mises de côté" 
     },
     { 
       id: "to_prepare", 
-      title: "À préparer", 
+      title: t.opportunities.toPrepare, 
       color: "text-purple-400", 
       badgeBg: "bg-purple-500/15 text-purple-300 border border-purple-500/30",
       borderActive: "border-purple-400/60 bg-purple-500/[0.04]",
-      desc: "Dossier & CV en préparation" 
+      desc: language === "en" ? "Application & CV in preparation" : "Dossier & CV en préparation" 
     },
     { 
       id: "to_study", 
-      title: "À étudier", 
+      title: t.opportunities.toStudy, 
       color: "text-amber-400", 
       badgeBg: "bg-amber-500/15 text-amber-300 border border-amber-500/30",
       borderActive: "border-amber-400/60 bg-amber-500/[0.04]",
-      desc: "Analyse d'adéquation en cours" 
+      desc: language === "en" ? "Fit & requirement analysis" : "Analyse d'adéquation en cours" 
     },
     { 
       id: "to_apply", 
-      title: "À candidater", 
+      title: t.opportunities.toApply, 
       color: "text-emerald-400", 
       badgeBg: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
       borderActive: "border-emerald-400/60 bg-emerald-500/[0.04]",
-      desc: "Prêt pour envoi de candidature" 
+      desc: language === "en" ? "Ready to submit application" : "Prêt pour envoi de candidature" 
     }
   ];
 
@@ -357,6 +368,93 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
       showToast("Erreur d'extraction IA. Utilisation d'un modèle standard.", "error");
     } finally {
       setIsExtracting(false);
+    }
+  };
+
+  const handleEnrichOpportunityCompany = async () => {
+    if (!selectedOpp) return;
+    showToast(`Recherche web pour ${selectedOpp.companyName}...`, "ai");
+    try {
+      const co = dbStore.getCompanyByNameOrCreate(selectedOpp.companyName);
+      let data: any;
+      if (co && co.description) {
+        data = {
+          sector: co.sector,
+          description: co.description,
+          size: co.size,
+          location: co.location,
+          foundingYear: co.foundingYear,
+          companyStatus: co.companyStatus,
+          parentGroup: co.parentGroup,
+          revenue: co.revenue,
+          metrics: co.metrics
+        };
+      } else {
+        const res = await fetch("/api/gemini", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "enrichCompany", payload: { companyName: selectedOpp.companyName } })
+        });
+        if (!res.ok) throw new Error("Failed");
+        data = await res.json();
+
+        if (data.description || data.sector) {
+          const updatedCo: Company = {
+            ...co,
+            sector: data.sector || co.sector,
+            description: data.description || co.description,
+            size: data.size || co.size,
+            location: data.location || co.location,
+            foundingYear: data.foundingYear || co.foundingYear,
+            companyStatus: data.companyStatus || co.companyStatus,
+            parentGroup: data.parentGroup || co.parentGroup,
+            revenue: data.revenue || co.revenue,
+            metrics: data.metrics && data.metrics.length > 0 ? data.metrics : co.metrics,
+            enrichmentStatus: 'enriched',
+            lastEnrichedAt: new Date().toISOString()
+          };
+          dbStore.updateCompany(updatedCo);
+        }
+      }
+
+      if (!data.description && !data.sector) {
+        showToast("Aucune information supplémentaire trouvée en ligne pour cette entreprise.", "info");
+        return;
+      }
+
+      const currentDetails = selectedOpp.extractedInfo?.entrepriseDetails || {};
+      const updatedDetails = {
+        ...currentDetails,
+        presentation: currentDetails.presentation || data.description,
+        secteur: currentDetails.secteur && currentDetails.secteur !== "Secteur à préciser" ? currentDetails.secteur : data.sector,
+        taille: currentDetails.taille || data.size,
+        siege: currentDetails.siege || data.location,
+        parentGroup: currentDetails.parentGroup || data.parentGroup,
+        chiffresCles: currentDetails.chiffresCles && currentDetails.chiffresCles.length > 0 ? currentDetails.chiffresCles : (data.metrics || [])
+      };
+
+      const updatedOpp = {
+        ...selectedOpp,
+        extractedInfo: {
+          ...(selectedOpp.extractedInfo || {
+            missions: [],
+            competencesRequises: [],
+            competencesAppreciees: [],
+            softSkills: [],
+            outilsLogiciels: [],
+            formation: "",
+            experienceRequise: "",
+            languesRequises: []
+          }),
+          entrepriseDetails: updatedDetails
+        }
+      };
+
+      dbStore.updateOpportunity(updatedOpp);
+      setSelectedOpp(updatedOpp);
+      showToast(`Fiche entreprise ${selectedOpp.companyName} enrichie avec succès !`, "success");
+    } catch (e) {
+      showToast("Échec de la recherche web", "error");
     }
   };
 
@@ -483,14 +581,14 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-2xl lg:text-3xl font-extrabold text-[#F5F6FA] tracking-tight font-display whitespace-nowrap">
-            Opportunités
+            {t.opportunities.title}
           </h1>
           <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white/5 border border-white/10 text-[#9AA0B2] whitespace-nowrap">
-            {filteredOpps.length} offre{filteredOpps.length > 1 ? "s" : ""}
+            {filteredOpps.length} {language === "en" ? (filteredOpps.length > 1 ? "opportunities" : "opportunity") : (filteredOpps.length > 1 ? "offres" : "offre")}
           </span>
           <span className="hidden xl:inline-block text-[#9AA0B2]/30">•</span>
           <p className="hidden xl:block text-[#9AA0B2] text-xs truncate max-w-sm 2xl:max-w-md">
-            Tableau Kanban à 4 colonnes pour piloter tes candidatures
+            {t.opportunities.subtitle}
           </p>
         </div>
 
@@ -502,7 +600,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
             onClick={() => setIsImportModalOpen(true)}
             icon={<Upload className="w-3.5 h-3.5 text-[#9AA0B2]" />}
           >
-            Importer un CSV
+            {t.opportunities.importCsv}
           </GlassButton>
 
           <GlassButton
@@ -514,7 +612,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
             }}
             icon={<Sparkles className="w-3.5 h-3.5 text-[#C084FC] animate-pulse" />}
           >
-            Extraire une offre avec l'IA
+            {t.opportunities.extractAi}
           </GlassButton>
 
           <GlassButton 
@@ -526,7 +624,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
             }}
             icon={<Plus className="w-4 h-4 text-white" />}
           >
-            Ajouter une offre
+            {t.opportunities.addOpportunity}
           </GlassButton>
         </div>
       </div>
@@ -541,7 +639,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
             type="text"
             value={localSearch}
             onChange={(e) => setLocalSearch(e.target.value)}
-            placeholder="Rechercher par entreprise, poste, lieu..."
+            placeholder={t.opportunities.searchPlaceholder}
             className="w-full pl-9 pr-8 py-1.5 glass-input text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
           />
           {localSearch && (
@@ -558,9 +656,9 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl border border-white/10">
             {[
-              { id: "all", label: "Tous" },
-              { id: "Apprentissage", label: "Apprentissage" },
-              { id: "Stage", label: "Stage" },
+              { id: "all", label: t.opportunities.filterAll },
+              { id: "Apprentissage", label: t.opportunities.filterApprenticeship },
+              { id: "Stage", label: t.opportunities.filterInternship },
               { id: "CDI", label: "CDI" },
               { id: "CDD", label: "CDD" }
             ].map(chip => (
@@ -588,7 +686,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
             }`}
           >
             <Clock className={`w-3.5 h-3.5 ${filterLate ? "text-[#F04438] animate-pulse" : "text-[#9AA0B2]"}`} />
-            <span>Retards</span>
+            <span>{t.opportunities.filterLate}</span>
             {filterLate && (
               <span className="w-1.5 h-1.5 rounded-full bg-[#F04438] animate-ping ml-0.5" />
             )}
@@ -596,7 +694,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
 
           {/* Total Counter badge */}
           <span className="text-[11px] text-[#9AA0B2] font-semibold px-2.5 py-1 glass-pill bg-white/[0.04]">
-            {filteredOpps.length} / {opportunities.length} offres
+            {filteredOpps.length} / {opportunities.length} {language === "en" ? "opportunities" : "offres"}
           </span>
         </div>
       </div>
@@ -653,12 +751,15 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                     isOver ? "bg-white/5 border border-dashed border-white/20" : "border-2 border-dashed border-white/[0.04]"
                   }`}>
                     <Briefcase className="w-8 h-8 text-slate-600 mb-2" />
-                    <p className="text-xs text-[#9AA0B2] font-medium">Aucune offre</p>
-                    <p className="text-[11px] text-[#9AA0B2]/70 mt-1">Glissez une offre ici</p>
+                    <p className="text-xs text-[#9AA0B2] font-medium">{language === "en" ? "No offers" : "Aucune offre"}</p>
+                    <p className="text-[11px] text-[#9AA0B2]/70 mt-1">{language === "en" ? "Drag an offer here" : "Glissez une offre ici"}</p>
                   </div>
                 ) : (
                   colOpps.map(opp => {
                     const isBeingDragged = draggedOppId === opp.id;
+
+                    const matchResult = computeOpportunityMatch(candidateProfile, opp, candidateDocs);
+                    const matchColor = matchResult.score >= 80 ? "text-[#34D399] bg-[#34D399]/10 border-[#34D399]/30" : matchResult.score >= 65 ? "text-[#38BDF8] bg-[#38BDF8]/10 border-[#38BDF8]/30" : "text-[#FBBF24] bg-[#FBBF24]/10 border-[#FBBF24]/30";
 
                     return (
                       <div
@@ -674,23 +775,34 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                           isBeingDragged ? "opacity-40 scale-95 border-dashed border-white/40" : ""
                         }`}
                       >
-                        {/* 1. Entreprise & Action */}
+                        {/* 1. Entreprise, Match IA & Action */}
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs font-bold text-[#FF6685] tracking-wide font-display truncate flex items-center gap-1.5">
                             <Building2 className="w-3.5 h-3.5 shrink-0 text-[#FF6685]" />
                             <span className="truncate">{opp.companyName}</span>
                           </span>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOppToDelete(opp);
-                            }}
-                            className="p-1 rounded-lg text-[#9AA0B2] hover:text-[#F04438] hover:bg-red-500/10 transition-colors cursor-pointer"
-                            title="Supprimer cette opportunité"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+
+                          <div className="flex items-center gap-1.5">
+                            <span 
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1 ${matchColor}`}
+                              title={`Score de matching IA : ${matchResult.score}%\n- Compétences : ${matchResult.skillsMatch}%\n- Secteur : ${matchResult.sectorMatch}%`}
+                            >
+                              <Sparkles className="w-2.5 h-2.5" />
+                              {matchResult.score}% Match
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOppToDelete(opp);
+                              }}
+                              className="p-1 rounded-lg text-[#9AA0B2] hover:text-[#F04438] hover:bg-red-500/10 transition-colors cursor-pointer"
+                              title={language === "en" ? "Delete this opportunity" : "Supprimer cette opportunité"}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
 
                         {/* 2. Intitulé du poste */}
@@ -728,9 +840,9 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                               rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
                               className="text-[#38BDF8] hover:text-[#7DD3FC] hover:underline inline-flex items-center gap-1 text-[11px] font-medium transition-colors shrink-0"
-                              title="Ouvrir le lien de l'offre"
+                              title={language === "en" ? "Open job offer link" : "Ouvrir le lien de l'offre"}
                             >
-                              <span>Offre</span>
+                              <span>{language === "en" ? "Offer" : "Offre"}</span>
                               <ExternalLink className="w-2.5 h-2.5 shrink-0" />
                             </a>
                           )}
@@ -747,7 +859,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                               <button
                                 key={c.id}
                                 onClick={() => handleMoveOpportunity(opp, c.id)}
-                                title={`Déplacer vers ${c.title}`}
+                                title={`${language === "en" ? "Move to" : "Déplacer vers"} ${c.title}`}
                                 className="flex items-center justify-center gap-1 px-1.5 py-1.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.08] text-[#9AA0B2] hover:text-[#F5F6FA] text-[11px] font-semibold border border-white/5 hover:border-white/15 transition-all group/btn text-center cursor-pointer min-w-0"
                               >
                                 <span className="text-[#FF6685] group-hover/btn:translate-x-0.5 transition-transform font-bold text-[10px] shrink-0">→</span>
@@ -1158,10 +1270,10 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
               className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#9AA0B2] hover:text-[#F5F6FA] border border-white/10 text-xs font-semibold transition-colors cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Retour aux opportunités</span>
+              <span>{language === "en" ? "Back to opportunities" : "Retour aux opportunités"}</span>
             </button>
             <span className="text-xs text-[#9AA0B2] font-medium hidden sm:inline-block">
-              Fiche opportunité & Dossier de candidature
+              {language === "en" ? "Opportunity file & Application workspace" : "Fiche opportunité & Dossier de candidature"}
             </span>
           </div>
 
@@ -1195,19 +1307,19 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#F5F6FA] hover:text-white border border-white/10 text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <Edit3 className="w-3.5 h-3.5 text-[#9AA0B2]" />
-                    <span>Modifier</span>
+                    <span>{language === "en" ? "Edit" : "Modifier"}</span>
                   </button>
 
                   <button
                     onClick={() => {
                       setReExtractOpp(selectedOpp);
                       setIsAiExtractionModalOpen(true);
-                      showToast("Ouverture de l'extracteur IA pour ré-analyse...", "ai");
+                      showToast(language === "en" ? "Opening AI extractor for re-analysis..." : "Ouverture de l'extracteur IA pour ré-analyse...", "ai");
                     }}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-900/30 to-rose-900/30 hover:from-purple-900/45 hover:to-rose-900/45 text-purple-200 hover:text-white border border-purple-500/30 text-xs font-semibold shadow-[0_4px_16px_rgba(147,51,234,0.2)] transition-spring cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-[#C084FC] animate-pulse" />
-                    <span>Ré-extraire avec l'IA</span>
+                    <span>{language === "en" ? "Re-extract with AI" : "Ré-extraire avec l'IA"}</span>
                   </button>
 
                   {selectedOpp.url && (
@@ -1218,14 +1330,14 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#9AA0B2] hover:text-[#F5F6FA] border border-white/10 text-xs font-semibold transition-colors"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Offre web</span>
+                      <span>{language === "en" ? "Web offer" : "Offre web"}</span>
                     </a>
                   )}
 
                   <button
                     onClick={() => setSelectedOpp(null)}
                     className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#9AA0B2] hover:text-white border border-white/10 transition-colors cursor-pointer ml-1"
-                    title="Fermer la fiche"
+                    title={language === "en" ? "Close" : "Fermer la fiche"}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -1270,7 +1382,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                 {/* 6. Date de début: Sobre Liquid Glass */}
                 <span className="px-2.5 py-1 rounded-xl bg-white/[0.04] border border-white/10 text-[#9AA0B2] flex items-center gap-1.5 whitespace-nowrap shrink-0">
                   <Calendar className="w-3.5 h-3.5 text-[#9AA0B2]" />
-                  Début : <span className="text-[#F5F6FA] font-medium">{selectedOpp.startDate || "Dès que possible"}</span>
+                  {language === "en" ? "Start:" : "Début :"} <span className="text-[#F5F6FA] font-medium">{selectedOpp.startDate || (language === "en" ? "As soon as possible" : "Dès que possible")}</span>
                 </span>
 
                 {/* 7. Deadline: Ambre sémantique si spécifiée */}
@@ -1280,7 +1392,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                     : "bg-white/[0.04] border-white/10 text-[#9AA0B2]"
                 }`}>
                   <CalendarClock className={`w-3.5 h-3.5 ${selectedOpp.deadline ? "text-[#FBBF24]" : "text-[#9AA0B2]"}`} />
-                  Deadline : <span className={selectedOpp.deadline ? "text-[#FBBF24] font-semibold" : "text-[#9AA0B2]"}>{selectedOpp.deadline || "Non spécifiée"}</span>
+                  Deadline : <span className={selectedOpp.deadline ? "text-[#FBBF24] font-semibold" : "text-[#9AA0B2]"}>{selectedOpp.deadline || (language === "en" ? "Not specified" : "Non spécifiée")}</span>
                 </span>
 
                 {/* 8. Statut actuel: Couleurs sémantiques distinctes */}
@@ -1298,7 +1410,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                 {selectedOpp.aiExtracted && (
                   <span className="px-2.5 py-1 rounded-xl bg-[rgba(147,51,234,0.12)] text-[#C084FC] border border-[rgba(147,51,234,0.25)] text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0">
                     <Sparkles className="w-3.5 h-3.5 text-[#C084FC]" />
-                    Analyse IA
+                    {language === "en" ? "AI Analysis" : "Analyse IA"}
                   </span>
                 )}
               </div>
@@ -1312,7 +1424,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                   activeTab === 'offre' ? 'glass-pill bg-[rgba(216,26,69,0.18)] text-[#FF6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]' : 'text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/5'
                 }`}
               >
-                Offre & Missions
+                {language === "en" ? "Offer & Missions" : "Offre & Missions"}
               </button>
               <button
                 onClick={() => setActiveTab("profil")}
@@ -1320,7 +1432,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                   activeTab === 'profil' ? 'glass-pill bg-[rgba(216,26,69,0.18)] text-[#FF6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]' : 'text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/5'
                 }`}
               >
-                Profil & Recrutement
+                {language === "en" ? "Candidate Profile" : "Profil & Recrutement"}
               </button>
               <button
                 onClick={() => setActiveTab("entreprise")}
@@ -1328,7 +1440,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                   activeTab === 'entreprise' ? 'glass-pill bg-[rgba(216,26,69,0.18)] text-[#FF6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]' : 'text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/5'
                 }`}
               >
-                Entreprise
+                {language === "en" ? "Company" : "Entreprise"}
               </button>
               <button
                 onClick={() => setActiveTab("workflow")}
@@ -1336,7 +1448,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                   activeTab === 'workflow' ? 'glass-pill bg-[rgba(216,26,69,0.18)] text-[#FF6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]' : 'text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/5'
                 }`}
               >
-                Workflow & Suivi
+                {language === "en" ? "Workflow & Tracking" : "Workflow & Suivi"}
               </button>
             </div>
 
@@ -1776,6 +1888,16 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
               {activeTab === "entreprise" && (
                 <div className="space-y-6">
                   
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleEnrichOpportunityCompany}
+                      className="px-4 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-xs text-[#F5F6FA] hover:bg-white/10 hover:border-[#FF6685]/40 transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-[#FF6685]" />
+                      <span>Rechercher plus d'informations sur le web</span>
+                    </button>
+                  </div>
+
                   {/* Identité & Présentation */}
                   <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-3">
                     <div className="flex items-center gap-2">

@@ -8,14 +8,37 @@ import {
   analyzeLinkedInContacts, 
   generateOutreachMessage, 
   handlePersonaChat,
-  parseCV
+  parseCV,
+  generateDailyBrief,
+  parseContactsFromText,
+  enrichCompanyWithWebSearch,
+  evaluateContactStrategicInterests
 } from "./src/api/gemini.ts";
+import { 
+  optimizeExperienceWithFramework, 
+  auditProfileAgainstFramework, 
+  computeOpportunityMatch 
+} from "./src/api/cvFramework.ts";
+import { 
+  recommendNetworkingStrategy, 
+  generateOutreachMessageWithFramework, 
+  generateFollowUpMessageWithFramework 
+} from "./src/api/networkingFramework.ts";
 import { extractJobOfferWithCascade } from "./src/api/jobExtractor.ts";
 
 dotenv.config();
 
 async function startServer() {
   const app = express();
+
+  // Force HTTPS redirect in production if behind HTTP proxy
+  app.use((req, res, next) => {
+    if (process.env.NODE_ENV === "production" && req.headers["x-forwarded-proto"] === "http") {
+      return res.redirect(301, `https://${req.headers.host}${req.url}`);
+    }
+    next();
+  });
+
   app.use(express.json({ limit: "30mb" }));
   app.use(express.urlencoded({ extended: true, limit: "30mb" }));
 
@@ -186,16 +209,36 @@ async function startServer() {
           return res.json(await extractJobOfferWithCascade(payload.jobDescription, payload.sourceUrl));
         case "parseCV":
           return res.json(await parseCV(payload.cvText, payload.linkedinText));
+        case "generateDailyBrief":
+          return res.json(await generateDailyBrief(payload));
         case "extractJobDetails":
           return res.json(await extractJobDetails(payload.jobDescription));
         case "analyzeLinkedIn":
           return res.json(await analyzeLinkedInContacts(payload.rawContacts, payload.profile));
+        case "parseContactsFromText":
+          return res.json(await parseContactsFromText(payload.text, payload.profile));
         case "outreachMessage":
           return res.json({ message: await generateOutreachMessage(
             payload.contactName, payload.contactJob, payload.contactCompany, 
             payload.connectionPoints || [], payload.profile, payload.opportunityTitle,
             payload.format
           )});
+        case "enrichCompany":
+          return res.json(await enrichCompanyWithWebSearch(payload.companyName));
+        case "evaluateContactStrategicInterests":
+          return res.json(await evaluateContactStrategicInterests(payload.contact, payload.profile));
+        case "optimizeCVExperience":
+          return res.json(await optimizeExperienceWithFramework(payload.experience, payload.profile, payload.targetOfferTitle));
+        case "auditCV":
+          return res.json(await auditProfileAgainstFramework(payload.profile));
+        case "matchOpportunity":
+          return res.json(computeOpportunityMatch(payload.profile, payload.opportunity, payload.documents || []));
+        case "recommendNetworkingStrategy":
+          return res.json(recommendNetworkingStrategy(payload.contact, payload.profile, payload.goal, payload.preferredChannel));
+        case "generateNetworkingOutreach":
+          return res.json(await generateOutreachMessageWithFramework(payload.contact, payload.profile, payload.options));
+        case "generateNetworkingFollowUp":
+          return res.json(generateFollowUpMessageWithFramework(payload.contact, payload.profile, payload.followUpNumber, payload.options));
         case "chat":
           return res.json({ 
             response: await handlePersonaChat(

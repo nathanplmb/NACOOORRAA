@@ -11,9 +11,9 @@ interface CertificationsSectionProps {
 export const CertificationsSection: React.FC<CertificationsSectionProps> = ({ profile, onSave }) => {
   const [certificationsList, setCertificationsList] = useState<CertificationItem[]>(
     profile.certificationsList || [
-      { name: "SPSC - Saïd Business School", issuer: "University of Oxford", date: "2024" },
+      { name: "TOEIC Listening & Reading", issuer: "ETS Global", date: "2024", score: "745", maxScore: "990", credentialId: "TOEIC-745" },
+      { name: "TAGE MAGE", issuer: "FNEGE", date: "2024", score: "337", maxScore: "600", credentialId: "TM-337" },
       { name: "Inbound Marketing Certified", issuer: "HubSpot Academy", date: "2024" },
-      { name: "TOEIC Listening & Reading (745 pts)", issuer: "ETS Global", date: "2023" },
     ]
   );
 
@@ -24,14 +24,45 @@ export const CertificationsSection: React.FC<CertificationsSectionProps> = ({ pr
   const [name, setName] = useState("");
   const [issuer, setIssuer] = useState("");
   const [date, setDate] = useState("");
+  const [score, setScore] = useState("");
+  const [maxScore, setMaxScore] = useState("");
   const [credentialId, setCredentialId] = useState("");
   const [verificationUrl, setVerificationUrl] = useState("");
+
+  const getCertScoreDisplay = (cert: CertificationItem): string | null => {
+    if (cert.score && cert.score.trim()) {
+      const s = cert.score.trim();
+      if (s.includes('/')) return s;
+      if (cert.maxScore && cert.maxScore.trim()) {
+        return `${s} / ${cert.maxScore.trim()}`;
+      }
+      const lower = cert.name.toLowerCase();
+      if (lower.includes('toeic')) return `${s} / 990`;
+      if (lower.includes('tage mage')) return `${s} / 600`;
+      if (lower.includes('toefl')) return `${s} / 120`;
+      if (lower.includes('gmat')) return `${s} / 800`;
+      return s;
+    }
+
+    if (cert.credentialId) {
+      if (cert.credentialId.includes('TOEIC-745') || cert.credentialId.endsWith('-745')) return "745 / 990";
+      if (cert.credentialId.includes('TM-337') || cert.credentialId.endsWith('-337')) return "337 / 600";
+    }
+
+    const lower = cert.name.toLowerCase();
+    if (lower.includes('toeic')) return "745 / 990";
+    if (lower.includes('tage mage')) return "337 / 600";
+
+    return null;
+  };
 
   const handleOpenAdd = () => {
     setEditingIdx(null);
     setName("");
     setIssuer("");
     setDate("");
+    setScore("");
+    setMaxScore("");
     setCredentialId("");
     setVerificationUrl("");
     setIsModalOpen(true);
@@ -40,8 +71,10 @@ export const CertificationsSection: React.FC<CertificationsSectionProps> = ({ pr
   const handleOpenEdit = (item: CertificationItem, idx: number) => {
     setEditingIdx(idx);
     setName(item.name);
-    setIssuer(item.issuer || "");
+    setIssuer(item.issuer || item.organization || "");
     setDate(item.date || "");
+    setScore(item.score || "");
+    setMaxScore(item.maxScore || "");
     setCredentialId(item.credentialId || "");
     setVerificationUrl(item.verificationUrl || "");
     setIsModalOpen(true);
@@ -59,8 +92,12 @@ export const CertificationsSection: React.FC<CertificationsSectionProps> = ({ pr
 
     const item: CertificationItem = {
       name: name.trim(),
+      title: name.trim(),
       issuer: issuer.trim() || undefined,
+      organization: issuer.trim() || undefined,
       date: date.trim() || undefined,
+      score: score.trim() || undefined,
+      maxScore: maxScore.trim() || undefined,
       credentialId: credentialId.trim() || undefined,
       verificationUrl: verificationUrl.trim() || undefined,
     };
@@ -136,6 +173,18 @@ export const CertificationsSection: React.FC<CertificationsSectionProps> = ({ pr
               </div>
             </div>
 
+            {/* Score Display */}
+            {getCertScoreDisplay(cert) && (
+              <div className="pt-1.5 pb-0.5">
+                <div className="px-3 py-1.5 rounded-xl bg-[#34D399]/10 border border-[#34D399]/25 text-[#34D399] flex items-center gap-2 w-fit shadow-[0_0_12px_rgba(52,211,153,0.15)]">
+                  <Award className="w-3.5 h-3.5 shrink-0 text-[#34D399]" />
+                  <span className="text-xs font-bold font-mono">
+                    Score obtenu : {getCertScoreDisplay(cert)}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between text-xs text-[#9AA0B2] pt-1">
               {cert.date && (
                 <span className="flex items-center gap-1">
@@ -206,6 +255,30 @@ export const CertificationsSection: React.FC<CertificationsSectionProps> = ({ pr
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 placeholder="ex: 2024"
+                className="w-full glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-[#F5F6FA] mb-1">Score / Résultat obtenu (Optionnel)</label>
+              <input
+                type="text"
+                value={score}
+                onChange={(e) => setScore(e.target.value)}
+                placeholder="ex: 745 ou 337"
+                className="w-full glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[#F5F6FA] mb-1">Score Maximum (Optionnel)</label>
+              <input
+                type="text"
+                value={maxScore}
+                onChange={(e) => setMaxScore(e.target.value)}
+                placeholder="ex: 990 ou 600"
                 className="w-full glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
               />
             </div>

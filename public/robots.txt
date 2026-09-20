@@ -1,0 +1,14 @@
+User-agent: *
+Disallow: /opportunities
+Disallow: /contacts
+Disallow: /entreprises
+Disallow: /calendrier
+Disallow: /documents
+Disallow: /hubia
+Disallow: /profile
+
+Allow: /
+Allow: /politique-confidentialite
+Allow: /cgu
+
+Sitemap: https://ais-dev-woa7n2nfotl6jhc7ou3ne7-529877172366.europe-west2.run.app/sitemap.xml

@@ -20,20 +20,17 @@ export const Badge: React.FC<BadgeProps> = ({
   
   const colors = {
     // Crimson NACORA: reserved for active/brand items
-    brand: "bg-[rgba(216,26,69,0.18)] text-[#ff6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]",
-    crimson: "bg-[rgba(216,26,69,0.18)] text-[#ff6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]",
-    // Soft Blue
-    blue: "bg-[rgba(14,165,233,0.12)] text-[#38bdf8] border-[rgba(14,165,233,0.25)]",
-    // Success Green (#12B76A)
-    green: "bg-[rgba(18,183,106,0.14)] text-[#12B76A] border-[rgba(18,183,106,0.28)]",
-    // Purple AI
-    purple: "bg-[rgba(147,51,234,0.14)] text-[#c084fc] border-[rgba(147,51,234,0.28)]",
-    // Amber Warning (#F79009)
-    amber: "bg-[rgba(247,144,9,0.14)] text-[#f79009] border-[rgba(247,144,9,0.28)]",
-    // Secondary Gray (#9AA0B2)
-    gray: "bg-[rgba(255,255,255,0.06)] text-[#9AA0B2] border-[rgba(255,255,255,0.12)]",
-    // Destructive Error (#F04438)
-    error: "bg-[rgba(240,68,56,0.14)] text-[#f04438] border-[rgba(240,68,56,0.28)]"
+    brand: "bg-[rgba(216,26,69,0.14)] text-[#ff6685] border-[rgba(216,26,69,0.30)] shadow-[0_0_12px_rgba(216,26,69,0.15)]",
+    crimson: "bg-[rgba(216,26,69,0.14)] text-[#ff6685] border-[rgba(216,26,69,0.30)] shadow-[0_0_12px_rgba(216,26,69,0.15)]",
+    // Secondary Gray/White Liquid Glass (#F5F6FA)
+    gray: "bg-white/[0.05] text-[#F5F6FA] border-white/12",
+    // Bleu glacier / Alumni / Relations
+    blue: "bg-[rgba(56,189,248,0.12)] text-[#38BDF8] border-[rgba(56,189,248,0.25)] shadow-[0_0_10px_rgba(56,189,248,0.10)]",
+    // Targeted semantic states
+    green: "bg-[rgba(18,183,106,0.12)] text-[#34D399] border-[rgba(18,183,106,0.25)] shadow-[0_0_10px_rgba(18,183,106,0.10)]",
+    purple: "bg-[rgba(192,132,252,0.12)] text-[#c084fc] border-[rgba(192,132,252,0.25)] shadow-[0_0_10px_rgba(192,132,252,0.10)]",
+    amber: "bg-[rgba(247,144,9,0.12)] text-[#f79009] border-[rgba(247,144,9,0.25)] shadow-[0_0_10px_rgba(247,144,9,0.10)]",
+    error: "bg-[rgba(240,68,56,0.12)] text-[#f04438] border-[rgba(240,68,56,0.25)]"
   };
 
   return (

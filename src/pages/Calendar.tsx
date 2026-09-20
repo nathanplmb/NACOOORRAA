@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useLanguage } from "../context/LanguageContext";
 import { dbStore } from "../dbStore";
 import { CalendarEvent, Opportunity } from "../types";
 import { GlassButton, Modal } from "../components/Shared";
@@ -20,10 +21,16 @@ import {
 
 type FilterType = "all" | "interview" | "deadline" | "follow_up" | "other";
 
-const DAYS_OF_WEEK = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
-const DAYS_OF_WEEK_SHORT = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+const DAYS_OF_WEEK_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+const DAYS_OF_WEEK_SHORT_FR = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+const DAYS_OF_WEEK_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAYS_OF_WEEK_SHORT_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export const Calendar: React.FC = () => {
+  const { language, t } = useLanguage();
+  const DAYS_OF_WEEK = language === "en" ? DAYS_OF_WEEK_EN : DAYS_OF_WEEK_FR;
+  const DAYS_OF_WEEK_SHORT = language === "en" ? DAYS_OF_WEEK_SHORT_EN : DAYS_OF_WEEK_SHORT_FR;
+
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   
@@ -71,29 +78,29 @@ export const Calendar: React.FC = () => {
 
   // Relative Date Formatter for "À venir" column
   const formatEventDateLabel = (dateStr: string) => {
-    if (dateStr === todayIso) return "Aujourd'hui";
+    if (dateStr === todayIso) return language === "en" ? "Today" : "Aujourd'hui";
     
     const today = new Date();
     const tomorrow = new Date(today);
     tomorrow.setDate(today.getDate() + 1);
     const tomorrowIso = formatDateToIso(tomorrow);
-    if (dateStr === tomorrowIso) return "Demain";
+    if (dateStr === tomorrowIso) return language === "en" ? "Tomorrow" : "Demain";
 
     const [y, m, d] = dateStr.split("-").map(Number);
     if (!y || !m || !d) return dateStr;
     const targetDate = new Date(y, m - 1, d);
-    return targetDate.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+    return targetDate.toLocaleDateString(language === "en" ? "en-US" : "fr-FR", { weekday: "short", day: "numeric", month: "short" });
   };
 
   // Current year & month
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth();
 
-  // French month label
+  // Month label
   const monthTitle = useMemo(() => {
-    const raw = currentDate.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+    const raw = currentDate.toLocaleDateString(language === "en" ? "en-US" : "fr-FR", { month: "long", year: "numeric" });
     return raw.charAt(0).toUpperCase() + raw.slice(1);
-  }, [currentDate]);
+  }, [currentDate, language]);
 
   // Calendar Grid Calculation
   const calendarCells = useMemo(() => {
@@ -342,25 +349,25 @@ export const Calendar: React.FC = () => {
         return {
           pill: "bg-purple-950/50 text-[#C084FC] border-purple-500/35",
           dot: "bg-[#C084FC]",
-          label: "Entretien"
+          label: language === "en" ? "Interview" : "Entretien"
         };
       case "deadline":
         return {
           pill: "bg-[rgba(216,26,69,0.18)] text-[#FF6685] border-[rgba(216,26,69,0.35)]",
           dot: "bg-[#D81A45]",
-          label: "Échéance"
+          label: language === "en" ? "Deadline" : "Échéance"
         };
       case "follow_up":
         return {
           pill: "bg-[rgba(247,144,9,0.16)] text-[#FBBF24] border-[rgba(247,144,9,0.30)]",
           dot: "bg-[#FBBF24]",
-          label: "Relance"
+          label: language === "en" ? "Follow-up" : "Relance"
         };
       default:
         return {
           pill: "bg-white/[0.04] text-[#9AA0B2] border-white/10",
           dot: "bg-[#9AA0B2]",
-          label: "Rappel"
+          label: language === "en" ? "Reminder" : "Rappel"
         };
     }
   };
@@ -382,21 +389,21 @@ export const Calendar: React.FC = () => {
           <div className="flex items-center bg-white/[0.04] border border-white/10 rounded-lg p-0.5 shrink-0">
             <button
               onClick={handlePrevMonth}
-              title="Mois précédent"
+              title={language === "en" ? "Previous month" : "Mois précédent"}
               className="p-1 rounded text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10 transition-colors cursor-pointer"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={handleGoToday}
-              title="Aller au mois actuel"
+              title={language === "en" ? "Go to current month" : "Aller au mois actuel"}
               className="px-2 py-0.5 text-[11px] font-semibold text-[#F5F6FA] hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
             >
-              Aujourd'hui
+              {t.calendar.today}
             </button>
             <button
               onClick={handleNextMonth}
-              title="Mois suivant"
+              title={language === "en" ? "Next month" : "Mois suivant"}
               className="p-1 rounded text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10 transition-colors cursor-pointer"
             >
               <ChevronRight className="w-3.5 h-3.5" />
@@ -422,7 +429,7 @@ export const Calendar: React.FC = () => {
                   : "text-[#9AA0B2] hover:text-[#F5F6FA]"
               }`}
             >
-              Tous ({totalCount})
+              {t.calendar.allEvents} ({totalCount})
             </button>
             <button
               onClick={() => setActiveFilter("deadline")}
@@ -433,7 +440,7 @@ export const Calendar: React.FC = () => {
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-[#D81A45]"></span>
-              Échéances ({deadlineCount})
+              {t.calendar.deadlines} ({deadlineCount})
             </button>
             <button
               onClick={() => setActiveFilter("interview")}
@@ -444,7 +451,7 @@ export const Calendar: React.FC = () => {
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-[#C084FC]"></span>
-              Entretiens ({interviewCount})
+              {t.calendar.interviews} ({interviewCount})
             </button>
             <button
               onClick={() => setActiveFilter("follow_up")}
@@ -455,7 +462,7 @@ export const Calendar: React.FC = () => {
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-[#FBBF24]"></span>
-              Relances ({followUpCount})
+              {t.calendar.followUps} ({followUpCount})
             </button>
           </div>
 
@@ -465,7 +472,7 @@ export const Calendar: React.FC = () => {
             onClick={handleOpenAdd} 
             icon={<Plus className="w-3.5 h-3.5 text-white" />}
           >
-            Ajouter
+            {t.calendar.addEvent}
           </GlassButton>
         </div>
       </div>
@@ -587,11 +594,11 @@ export const Calendar: React.FC = () => {
                 <Clock className="w-3.5 h-3.5" />
               </div>
               <h2 className="text-xs sm:text-sm font-bold text-[#F5F6FA] font-display">
-                À venir
+                {t.calendar.upcoming}
               </h2>
             </div>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-[#9AA0B2] border border-white/10">
-              {upcomingEvents.length} échéance{upcomingEvents.length > 1 ? "s" : ""}
+              {upcomingEvents.length} {language === "en" ? (upcomingEvents.length > 1 ? "events" : "event") : (upcomingEvents.length > 1 ? "échéances" : "échéance")}
             </span>
           </div>
 
@@ -685,15 +692,15 @@ export const Calendar: React.FC = () => {
                   <CalendarCheck className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="text-xs font-semibold text-[#F5F6FA]">Aucune échéance urgente</p>
-                  <p className="text-[11px] text-[#9AA0B2]">Toutes vos dates limites et relances sont à jour.</p>
+                  <p className="text-xs font-semibold text-[#F5F6FA]">{language === "en" ? "No urgent deadlines" : "Aucune échéance urgente"}</p>
+                  <p className="text-[11px] text-[#9AA0B2]">{language === "en" ? "All your deadlines and follow-ups are up to date." : "Toutes vos dates limites et relances sont à jour."}</p>
                 </div>
                 <button
                   onClick={handleOpenAdd}
                   className="mt-1 text-xs font-semibold text-[#D81A45] hover:text-[#FF6685] flex items-center gap-1 cursor-pointer transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Planifier un jalon
+                  {language === "en" ? "Schedule a milestone" : "Planifier un jalon"}
                 </button>
               </div>
             )}
@@ -706,7 +713,7 @@ export const Calendar: React.FC = () => {
               className="w-full py-2 px-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-xs font-semibold text-[#F5F6FA] flex items-center justify-center gap-1.5 transition-all cursor-pointer group"
             >
               <Plus className="w-3.5 h-3.5 text-[#D81A45] group-hover:scale-110 transition-transform" />
-              <span>Nouvelle échéance</span>
+              <span>{language === "en" ? "New milestone" : "Nouvelle échéance"}</span>
             </button>
           </div>
         </div>
@@ -716,16 +723,16 @@ export const Calendar: React.FC = () => {
       <Modal 
         isOpen={isAddOpen} 
         onClose={() => setIsAddOpen(false)} 
-        title="Ajouter une échéance ou un entretien" 
+        title={language === "en" ? "Add a deadline or interview" : "Ajouter une échéance ou un entretien"} 
         size="md"
       >
         <form onSubmit={handleSubmitAdd} className="space-y-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-[#9AA0B2] font-semibold">Titre de l'échéance *</label>
+            <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Title *" : "Titre de l'échéance *"}</label>
             <input
               type="text"
               required
-              placeholder="ex: Entretien RH BNP Paribas, Envoi du dossier..."
+              placeholder={language === "en" ? "e.g. HR Interview BNP Paribas, Application submission..." : "ex: Entretien RH BNP Paribas, Envoi du dossier..."}
               value={formTitle}
               onChange={(e) => setFormTitle(e.target.value)}
               className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
@@ -734,7 +741,7 @@ export const Calendar: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">Date *</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Date *" : "Date *"}</label>
               <input
                 type="date"
                 required
@@ -744,7 +751,7 @@ export const Calendar: React.FC = () => {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">Heure (optionnel)</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Time (optional)" : "Heure (optionnel)"}</label>
               <input
                 type="time"
                 value={formTime}
@@ -756,27 +763,27 @@ export const Calendar: React.FC = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">Type de jalon</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Event type" : "Type de jalon"}</label>
               <select
                 value={formType}
                 onChange={(e) => setFormType(e.target.value as any)}
                 className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] bg-[#060812]"
               >
-                <option value="deadline" className="bg-[#060812] text-[#F5F6FA]">Date limite de candidature</option>
-                <option value="interview" className="bg-[#060812] text-[#F5F6FA]">Entretien d'embauche</option>
-                <option value="follow_up" className="bg-[#060812] text-[#F5F6FA]">Message de relance</option>
-                <option value="other" className="bg-[#060812] text-[#F5F6FA]">Autre rappel</option>
+                <option value="deadline" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Application deadline" : "Date limite de candidature"}</option>
+                <option value="interview" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Job interview" : "Entretien d'embauche"}</option>
+                <option value="follow_up" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Follow-up message" : "Message de relance"}</option>
+                <option value="other" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Other reminder" : "Autre rappel"}</option>
               </select>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">Associer une offre (optionnel)</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Link opportunity (optional)" : "Associer une offre (optionnel)"}</label>
               <select
                 value={formOppId}
                 onChange={(e) => setFormOppId(e.target.value)}
                 className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] bg-[#060812]"
               >
-                <option value="" className="bg-[#060812] text-[#9AA0B2]">Aucune offre liée</option>
+                <option value="" className="bg-[#060812] text-[#9AA0B2]">{language === "en" ? "No linked opportunity" : "Aucune offre liée"}</option>
                 {opportunities.map(opp => (
                   <option key={opp.id} value={opp.id} className="bg-[#060812] text-[#F5F6FA]">
                     {opp.companyName} — {opp.title}
@@ -787,9 +794,9 @@ export const Calendar: React.FC = () => {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-[#9AA0B2] font-semibold">Notes & Préparation</label>
+            <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Notes & Preparation" : "Notes & Préparation"}</label>
             <textarea
-              placeholder="Précisions, lien visio, questions à poser, documents à apporter..."
+              placeholder={language === "en" ? "Details, video link, questions to ask, documents to bring..." : "Précisions, lien visio, questions à poser, documents à apporter..."}
               value={formNotes}
               onChange={(e) => setFormNotes(e.target.value)}
               className="w-full min-h-[80px] glass-input p-3 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
@@ -798,10 +805,10 @@ export const Calendar: React.FC = () => {
 
           <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
             <GlassButton type="button" variant="ghost" onClick={() => setIsAddOpen(false)}>
-              Annuler
+              {language === "en" ? "Cancel" : "Annuler"}
             </GlassButton>
             <GlassButton type="submit" variant="primary">
-              Planifier l'événement
+              {language === "en" ? "Schedule event" : "Planifier l'événement"}
             </GlassButton>
           </div>
         </form>
@@ -814,7 +821,7 @@ export const Calendar: React.FC = () => {
           setIsDetailOpen(false);
           setIsEditMode(false);
         }}
-        title={isEditMode ? "Modifier l'événement" : "Détail de l'échéance"}
+        title={isEditMode ? (language === "en" ? "Edit event" : "Modifier l'événement") : (language === "en" ? "Event details" : "Détail de l'échéance")}
         size="md"
       >
         {selectedEvent && (
@@ -830,7 +837,7 @@ export const Calendar: React.FC = () => {
                       </span>
                       {selectedEvent.completed && (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#12B76A]/20 text-[#34D399] border border-[#12B76A]/40 flex items-center gap-1">
-                          <Check className="w-3 h-3" /> Terminé
+                          <Check className="w-3 h-3" /> {language === "en" ? "Completed" : "Terminé"}
                         </span>
                       )}
                     </div>
@@ -842,7 +849,7 @@ export const Calendar: React.FC = () => {
                   <button
                     onClick={() => handleToggleComplete(selectedEvent)}
                     className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-[#9AA0B2] hover:text-white transition-colors cursor-pointer shrink-0"
-                    title={selectedEvent.completed ? "Marquer comme à faire" : "Marquer comme terminé"}
+                    title={selectedEvent.completed ? (language === "en" ? "Mark as to-do" : "Marquer comme à faire") : (language === "en" ? "Mark as completed" : "Marquer comme terminé")}
                   >
                     {selectedEvent.completed ? (
                       <CheckSquare className="w-5 h-5 text-[#34D399]" />
@@ -857,9 +864,9 @@ export const Calendar: React.FC = () => {
                   <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/10 flex items-center gap-2">
                     <Clock className="w-4 h-4 text-[#9AA0B2]" />
                     <div className="text-xs">
-                      <span className="text-[#9AA0B2] block text-[10px]">Date & Heure</span>
+                      <span className="text-[#9AA0B2] block text-[10px]">{language === "en" ? "Date & Time" : "Date & Heure"}</span>
                       <span className="font-semibold text-[#F5F6FA]">
-                        {selectedEvent.date} {selectedEvent.time ? `à ${selectedEvent.time}` : ""}
+                        {selectedEvent.date} {selectedEvent.time ? (language === "en" ? `at ${selectedEvent.time}` : `à ${selectedEvent.time}`) : ""}
                       </span>
                     </div>
                   </div>
@@ -868,7 +875,7 @@ export const Calendar: React.FC = () => {
                     <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/10 flex items-center gap-2">
                       <Building2 className="w-4 h-4 text-[#D81A45]" />
                       <div className="text-xs truncate">
-                        <span className="text-[#9AA0B2] block text-[10px]">Entreprise liée</span>
+                        <span className="text-[#9AA0B2] block text-[10px]">{language === "en" ? "Linked company" : "Entreprise liée"}</span>
                         <span className="font-semibold text-[#F5F6FA] truncate block">
                           {selectedEvent.companyName}
                         </span>
@@ -881,7 +888,7 @@ export const Calendar: React.FC = () => {
                   <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/10 flex items-center gap-2">
                     <Briefcase className="w-4 h-4 text-[#38BDF8]" />
                     <div className="text-xs truncate">
-                      <span className="text-[#9AA0B2] block text-[10px]">Opportunité associée</span>
+                      <span className="text-[#9AA0B2] block text-[10px]">{language === "en" ? "Associated opportunity" : "Opportunité associée"}</span>
                       <span className="font-semibold text-[#F5F6FA] truncate block">
                         {selectedEvent.opportunityTitle}
                       </span>
@@ -892,7 +899,7 @@ export const Calendar: React.FC = () => {
                 {/* Notes */}
                 {selectedEvent.notes && (
                   <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                    <span className="text-[10px] text-[#9AA0B2] uppercase tracking-wider font-semibold">Notes & Consignes</span>
+                    <span className="text-[10px] text-[#9AA0B2] uppercase tracking-wider font-semibold">{language === "en" ? "Notes & Instructions" : "Notes & Consignes"}</span>
                     <p className="text-xs text-[#F5F6FA] leading-relaxed whitespace-pre-wrap">{selectedEvent.notes}</p>
                   </div>
                 )}
@@ -904,12 +911,12 @@ export const Calendar: React.FC = () => {
                     className="p-2 rounded-xl text-[#F04438] hover:bg-[rgba(240,68,56,0.12)] transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
                   >
                     <Trash2 className="w-4 h-4" />
-                    Supprimer
+                    {language === "en" ? "Delete" : "Supprimer"}
                   </button>
 
                   <div className="flex items-center gap-2">
                     <GlassButton variant="secondary" size="sm" onClick={handleStartEdit} icon={<Edit3 className="w-3.5 h-3.5" />}>
-                      Modifier
+                      {language === "en" ? "Edit" : "Modifier"}
                     </GlassButton>
                     <GlassButton 
                       variant="primary" 
@@ -919,7 +926,7 @@ export const Calendar: React.FC = () => {
                         setIsDetailOpen(false);
                       }}
                     >
-                      {selectedEvent.completed ? "Rouvrir" : "Terminer"}
+                      {selectedEvent.completed ? (language === "en" ? "Reopen" : "Rouvrir") : (language === "en" ? "Complete" : "Terminer")}
                     </GlassButton>
                   </div>
                 </div>
@@ -928,7 +935,7 @@ export const Calendar: React.FC = () => {
               /* Edit Form */
               <form onSubmit={handleSaveEdit} className="space-y-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-[#9AA0B2] font-semibold">Titre de l'échéance *</label>
+                  <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Title *" : "Titre de l'échéance *"}</label>
                   <input
                     type="text"
                     required
@@ -940,7 +947,7 @@ export const Calendar: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-[#9AA0B2] font-semibold">Date *</label>
+                    <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Date *" : "Date *"}</label>
                     <input
                       type="date"
                       required
@@ -950,7 +957,7 @@ export const Calendar: React.FC = () => {
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-[#9AA0B2] font-semibold">Heure</label>
+                    <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Time" : "Heure"}</label>
                     <input
                       type="time"
                       value={formTime}
@@ -962,27 +969,27 @@ export const Calendar: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-[#9AA0B2] font-semibold">Type de jalon</label>
+                    <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Event type" : "Type de jalon"}</label>
                     <select
                       value={formType}
                       onChange={(e) => setFormType(e.target.value as any)}
                       className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] bg-[#060812]"
                     >
-                      <option value="deadline" className="bg-[#060812] text-[#F5F6FA]">Date limite de candidature</option>
-                      <option value="interview" className="bg-[#060812] text-[#F5F6FA]">Entretien d'embauche</option>
-                      <option value="follow_up" className="bg-[#060812] text-[#F5F6FA]">Message de relance</option>
-                      <option value="other" className="bg-[#060812] text-[#F5F6FA]">Autre rappel</option>
+                      <option value="deadline" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Application deadline" : "Date limite de candidature"}</option>
+                      <option value="interview" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Job interview" : "Entretien d'embauche"}</option>
+                      <option value="follow_up" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Follow-up message" : "Message de relance"}</option>
+                      <option value="other" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Other reminder" : "Autre rappel"}</option>
                     </select>
                   </div>
 
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-xs text-[#9AA0B2] font-semibold">Offre liée</label>
+                    <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Linked opportunity" : "Offre liée"}</label>
                     <select
                       value={formOppId}
                       onChange={(e) => setFormOppId(e.target.value)}
                       className="glass-input px-3.5 py-2.5 text-xs text-[#F5F6FA] bg-[#060812]"
                     >
-                      <option value="" className="bg-[#060812] text-[#9AA0B2]">Aucune offre liée</option>
+                      <option value="" className="bg-[#060812] text-[#9AA0B2]">{language === "en" ? "No linked opportunity" : "Aucune offre liée"}</option>
                       {opportunities.map(opp => (
                         <option key={opp.id} value={opp.id} className="bg-[#060812] text-[#F5F6FA]">
                           {opp.companyName} — {opp.title}
@@ -993,7 +1000,7 @@ export const Calendar: React.FC = () => {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-[#9AA0B2] font-semibold">Notes</label>
+                  <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Notes" : "Notes"}</label>
                   <textarea
                     value={formNotes}
                     onChange={(e) => setFormNotes(e.target.value)}
@@ -1003,10 +1010,10 @@ export const Calendar: React.FC = () => {
 
                 <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
                   <GlassButton type="button" variant="ghost" onClick={() => setIsEditMode(false)}>
-                    Annuler
+                    {language === "en" ? "Cancel" : "Annuler"}
                   </GlassButton>
                   <GlassButton type="submit" variant="primary">
-                    Enregistrer les modifications
+                    {language === "en" ? "Save changes" : "Enregistrer les modifications"}
                   </GlassButton>
                 </div>
               </form>

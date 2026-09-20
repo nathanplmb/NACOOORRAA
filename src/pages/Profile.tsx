@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useLanguage } from "../context/LanguageContext";
 import { dbStore, calculateProfileCompletion } from "../dbStore";
 import { CandidateProfile, DetailedExperience, DetailedEducation } from "../types";
 import { ProfileOverviewCard } from "../components/profile/ProfileOverviewCard";
@@ -32,6 +33,7 @@ import {
 } from "lucide-react";
 
 export const Profile: React.FC = () => {
+  const { language, t } = useLanguage();
   const [profile, setProfile] = useState<CandidateProfile>(dbStore.getProfile());
   const [activeSection, setActiveSection] = useState<string>("apercu");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -54,21 +56,21 @@ export const Profile: React.FC = () => {
 
   const handleUpdateProfile = (updatedFields: Partial<CandidateProfile>) => {
     dbStore.updateProfile(updatedFields);
-    showToast("Profil mis à jour avec succès");
+    showToast(language === "en" ? "Profile updated successfully" : "Profil mis à jour avec succès");
   };
 
   const handleSaveExperiences = (updatedExperiences: DetailedExperience[]) => {
     dbStore.updateProfile({
       experiences: updatedExperiences,
     });
-    showToast("Expériences mises à jour");
+    showToast(language === "en" ? "Experiences updated" : "Expériences mises à jour");
   };
 
   const handleSaveEducations = (updatedEducations: DetailedEducation[]) => {
     dbStore.updateProfile({
       educations: updatedEducations,
     });
-    showToast("Formations mises à jour");
+    showToast(language === "en" ? "Education updated" : "Formations mises à jour");
   };
 
   const { score, completedSections, totalSections, sectionsStatus } = calculateProfileCompletion(profile);
@@ -78,72 +80,88 @@ export const Profile: React.FC = () => {
   const navItems = [
     {
       id: "apercu",
-      label: "Aperçu",
+      label: t.profile.overview,
       icon: ShieldCheck,
-      subtitle: `${score}% complété (${completedSections}/${totalSections})`,
+      subtitle: language === "en" ? `${score}% completed (${completedSections}/${totalSections})` : `${score}% complété (${completedSections}/${totalSections})`,
       isCompleted: score === 100,
     },
     {
       id: "identite",
-      label: "Identité",
+      label: t.profile.identity,
       icon: User,
-      subtitle: profile.fullName || "Informations de contact",
+      subtitle: profile.fullName || (language === "en" ? "Contact information" : "Informations de contact"),
       isCompleted: Boolean(sectionsStatus.identity),
     },
     {
       id: "objectifs",
-      label: "Objectifs",
+      label: t.profile.objectives,
       icon: Target,
-      subtitle: `${profile.targetTitles?.length || 0} métier${(profile.targetTitles?.length || 0) > 1 ? 's' : ''}`,
+      subtitle: language === "en" 
+        ? `${profile.targetTitles?.length || 0} target job${(profile.targetTitles?.length || 0) > 1 ? 's' : ''}`
+        : `${profile.targetTitles?.length || 0} métier${(profile.targetTitles?.length || 0) > 1 ? 's' : ''}`,
       isCompleted: Boolean(sectionsStatus.objectives),
     },
     {
       id: "experiences",
-      label: "Expériences",
+      label: t.profile.experiences,
       icon: Briefcase,
-      subtitle: `${profile.experiences?.length || 0} expérience${(profile.experiences?.length || 0) > 1 ? 's' : ''}`,
+      subtitle: language === "en"
+        ? `${profile.experiences?.length || 0} experience${(profile.experiences?.length || 0) > 1 ? 's' : ''}`
+        : `${profile.experiences?.length || 0} expérience${(profile.experiences?.length || 0) > 1 ? 's' : ''}`,
       isCompleted: Boolean(sectionsStatus.experiences),
     },
     {
       id: "formations",
-      label: "Formations",
+      label: t.profile.education,
       icon: GraduationCap,
-      subtitle: `${profile.educations?.length || 0} formation${(profile.educations?.length || 0) > 1 ? 's' : ''}`,
+      subtitle: language === "en"
+        ? `${profile.educations?.length || 0} education${(profile.educations?.length || 0) > 1 ? 's' : ''}`
+        : `${profile.educations?.length || 0} formation${(profile.educations?.length || 0) > 1 ? 's' : ''}`,
       isCompleted: Boolean(sectionsStatus.educations),
     },
     {
       id: "competences",
-      label: "Compétences",
+      label: t.profile.skills,
       icon: Sparkles,
-      subtitle: `${totalSkillsCount} compétence${totalSkillsCount > 1 ? 's' : ''}`,
+      subtitle: language === "en"
+        ? `${totalSkillsCount} skill${totalSkillsCount > 1 ? 's' : ''}`
+        : `${totalSkillsCount} compétence${totalSkillsCount > 1 ? 's' : ''}`,
       isCompleted: Boolean(sectionsStatus.skills),
     },
     {
       id: "langues",
-      label: "Langues",
+      label: t.profile.languages,
       icon: Globe,
-      subtitle: `${profile.languagesList?.length || 0} langue${(profile.languagesList?.length || 0) > 1 ? 's' : ''}`,
+      subtitle: language === "en"
+        ? `${profile.languagesList?.length || 0} language${(profile.languagesList?.length || 0) > 1 ? 's' : ''}`
+        : `${profile.languagesList?.length || 0} langue${(profile.languagesList?.length || 0) > 1 ? 's' : ''}`,
       isCompleted: Boolean(sectionsStatus.languages),
     },
     {
       id: "certifications",
-      label: "Certifications",
+      label: t.profile.certifications,
       icon: Award,
-      subtitle: `${profile.certificationsList?.length || 0} certification${(profile.certificationsList?.length || 0) > 1 ? 's' : ''}`,
+      subtitle: language === "en"
+        ? `${profile.certificationsList?.length || 0} certification${(profile.certificationsList?.length || 0) > 1 ? 's' : ''}`
+        : `${profile.certificationsList?.length || 0} certification${(profile.certificationsList?.length || 0) > 1 ? 's' : ''}`,
       isCompleted: Boolean(sectionsStatus.certifications),
     },
     {
       id: "projets",
-      label: "Projets",
+      label: t.profile.projects,
       icon: Rocket,
-      subtitle: `${profile.projectsList?.length || 0} projet${(profile.projectsList?.length || 0) > 1 ? 's' : ''}`,
+      subtitle: language === "en"
+        ? `${profile.projectsList?.length || 0} project${(profile.projectsList?.length || 0) > 1 ? 's' : ''}`
+        : `${profile.projectsList?.length || 0} projet${(profile.projectsList?.length || 0) > 1 ? 's' : ''}`,
       isCompleted: Boolean(sectionsStatus.projects),
     },
     {
       id: "interets",
-      label: "Centres d'intérêt",
+      label: t.profile.interests,
       icon: Heart,
-      subtitle: `${profile.interests?.length || 0} centre${(profile.interests?.length || 0) > 1 ? 's' : ''} d'intérêt`,
+      subtitle: language === "en"
+        ? `${profile.interests?.length || 0} interest${(profile.interests?.length || 0) > 1 ? 's' : ''}`
+        : `${profile.interests?.length || 0} centre${(profile.interests?.length || 0) > 1 ? 's' : ''} d'intérêt`,
       isCompleted: Boolean(sectionsStatus.interests),
     },
   ];
@@ -263,22 +281,24 @@ export const Profile: React.FC = () => {
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-white/12 relative">
         <div className="space-y-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-black text-[#F5F6FA] font-display tracking-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)]">Mon Profil</h1>
+            <h1 className="text-3xl font-black text-[#F5F6FA] font-display tracking-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)]">{t.profile.title}</h1>
             <span className="px-3.5 py-1 rounded-full bg-[#D81A45]/20 border border-[#D81A45]/40 text-[#FF6685] text-xs font-bold font-display shadow-[0_0_20px_rgba(216,26,69,0.3)] backdrop-blur-xl">
-              {score}% complété
+              {score}% {t.profile.completed}
             </span>
           </div>
           <p className="text-xs sm:text-sm text-[#9AA0B2] max-w-3xl">
-            Espace personnel de gestion de profil NACORA. Sélectionnez une rubrique à gauche pour la consulter ou la modifier.
+            {language === "en" 
+              ? "Personal space for managing your NACORA profile. Select a section on the left to view or edit."
+              : "Espace personnel de gestion de profil NACORA. Sélectionnez une rubrique à gauche pour la consulter ou la modifier."}
           </p>
         </div>
 
         <button
-          onClick={() => showToast("Toutes vos données sont enregistrées en temps réel.")}
+          onClick={() => showToast(language === "en" ? "All your data is saved in real time." : "Toutes vos données sont enregistrées en temps réel.")}
           className="flex items-center gap-2 px-4.5 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 hover:border-white/30 text-xs font-bold text-[#F5F6FA] backdrop-blur-2xl shadow-md transition-all cursor-pointer hover:-translate-y-0.5 active:translate-y-0"
         >
           <Save className="w-4 h-4 text-[#34D399]" />
-          <span>Sauvegarde automatique</span>
+          <span>{t.profile.autoSave}</span>
         </button>
       </div>
 
@@ -318,10 +338,10 @@ export const Profile: React.FC = () => {
             <div className="px-3 py-2 text-[10px] font-black uppercase tracking-wider text-[#9AA0B2]/90 flex items-center justify-between border-b border-white/12 pb-2.5 relative z-10 font-display">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-[#D81A45] animate-pulse" />
-                Rubriques du profil
+                {language === "en" ? "Profile sections" : "Rubriques du profil"}
               </span>
               <span className="text-[#34D399] font-bold px-2 py-0.5 rounded-full bg-[#34D399]/15 border border-[#34D399]/30 text-[10px]">
-                {completedSections}/{totalSections} renseignées
+                {completedSections}/{totalSections} {language === "en" ? "filled" : "renseignées"}
               </span>
             </div>
 
@@ -390,7 +410,7 @@ export const Profile: React.FC = () => {
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-[#F5F6FA] font-display flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-[#FF6685] shadow-[0_0_8px_#FF6685]" />
-                Niveau du profil
+                {t.profile.profileLevel}
               </span>
               <span className="font-black text-[#FF6685] drop-shadow-[0_0_10px_rgba(255,102,133,0.5)] px-2 py-0.5 rounded-lg bg-[#D81A45]/20 border border-[#D81A45]/40 text-xs">{score}%</span>
             </div>
@@ -401,7 +421,9 @@ export const Profile: React.FC = () => {
               />
             </div>
             <p className="text-[11px] text-[#9AA0B2] leading-relaxed">
-              Un profil complet augmente significativement la pertinence des opportunités et des correspondances IA.
+              {language === "en"
+                ? "A complete profile significantly boosts the relevance of opportunities and AI matching."
+                : "Un profil complet augmente significativement la pertinence des opportunités et des correspondances IA."}
             </p>
           </div>
         </div>
@@ -419,7 +441,7 @@ export const Profile: React.FC = () => {
                   <span>{activeItem.label}</span>
                   {activeItem.isCompleted && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#34D399]/20 border border-[#34D399]/40 text-[#34D399] text-[10px] font-bold shadow-[0_0_12px_rgba(52,211,153,0.2)]">
-                      <Check className="w-3 h-3" /> Complété
+                      <Check className="w-3 h-3" /> {language === "en" ? "Completed" : "Complété"}
                     </span>
                   )}
                 </h2>
@@ -433,7 +455,7 @@ export const Profile: React.FC = () => {
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-xs font-bold text-[#9AA0B2] hover:text-[#F5F6FA] transition-all cursor-pointer shadow-sm hover:border-white/30"
               >
                 <ShieldCheck className="w-3.5 h-3.5 text-[#34D399]" />
-                <span>Retour à l'aperçu</span>
+                <span>{t.profile.returnOverview}</span>
               </button>
             )}
           </div>

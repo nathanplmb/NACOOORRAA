@@ -1,7 +1,14 @@
-import React, { useState } from "react";
-import { Contact, ContactCategory, ContactNetworkingStatus, Opportunity, CandidateProfile } from "../types";
+import React, { useState, useEffect } from "react";
+import { Contact, ContactCategory, ContactNetworkingStatus, Opportunity, CandidateProfile, NetworkingRelevanceItem } from "../types";
 import { dbStore } from "../dbStore";
+import { getCategoryBadgeStyle } from "../utils/contactMerger";
+import { 
+  ensureContactStrategicRelevance, 
+  requestAiStrategicInterests, 
+  computeStrategicInterests 
+} from "../utils/strategicInterests";
 import { GlassButton, Modal } from "./Shared";
+import { NetworkingMessageGenerator } from "./network/NetworkingMessageGenerator";
 import { 
   Building2, 
   Briefcase, 
@@ -31,7 +38,9 @@ import {
   Plus,
   ArrowRight,
   UserCheck,
-  Award
+  Award,
+  RefreshCw,
+  Compass
 } from "lucide-react";
 
 interface ContactDetailWorkspaceProps {
@@ -53,10 +62,14 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
 }) => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [activeMessage, setActiveMessage] = useState<string>(contact.aiCustomMessage || "");
-  const [messageType, setMessageType] = useState<"invite" | "inmail" | "followup">("invite");
-  const [isGeneratingMessage, setIsGeneratingMessage] = useState(false);
-  const [hasCopiedMessage, setHasCopiedMessage] = useState(false);
+
+  // Strategic networking relevance state
+  const [isAnalyzingStrategic, setIsAnalyzingStrategic] = useState(false);
+  const [isAddPillarModalOpen, setIsAddPillarModalOpen] = useState(false);
+  const [newPillarTitle, setNewPillarTitle] = useState("");
+  const [newPillarType, setNewPillarType] = useState("Opportunité");
+  const [newPillarContext, setNewPillarContext] = useState("");
+  const [newPillarRecommendation, setNewPillarRecommendation] = useState("");
 
   // Quick note input
   const [quickNoteText, setQuickNoteText] = useState("");
@@ -65,6 +78,15 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
 
   // Opportunities list for linking
   const opportunities = dbStore.getOpportunities();
+
+  // Auto-enrich strategic relevance on mount if absent
+  useEffect(() => {
+    if (!contact.networkingRelevance || contact.networkingRelevance.length === 0) {
+      const enriched = ensureContactStrategicRelevance(contact, profile);
+      dbStore.updateContact(enriched);
+      onUpdate(enriched);
+    }
+  }, [contact.id]);
 
   // Helper for Category badge display
   const getCategoryLabel = (cat: ContactCategory) => {
@@ -78,35 +100,70 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
     }
   };
 
+  // Refined Liquid Glass semantic color coding for category identification
   const getCategoryColor = (cat: ContactCategory) => {
     switch (cat) {
       case "recruiter":
-        return "bg-[rgba(18,183,106,0.14)] text-[#12B76A] border-[rgba(18,183,106,0.28)]";
+        return "bg-[rgba(18,183,106,0.12)] text-[#34D399] border-[rgba(18,183,106,0.28)] shadow-[0_0_12px_rgba(18,183,106,0.12)]";
       case "alumni":
-        return "bg-[rgba(14,165,233,0.12)] text-[#38bdf8] border-[rgba(14,165,233,0.25)]";
+        return "bg-[rgba(56,189,248,0.12)] text-[#38BDF8] border-[rgba(56,189,248,0.28)] shadow-[0_0_12px_rgba(56,189,248,0.12)]";
       case "sector_pro":
-        return "bg-[rgba(247,144,9,0.14)] text-[#f79009] border-[rgba(247,144,9,0.28)]";
+        return "bg-[rgba(216,26,69,0.14)] text-[#FF6685] border-[rgba(216,26,69,0.30)] shadow-[0_0_12px_rgba(216,26,69,0.14)]";
       case "student":
-        return "bg-[rgba(147,51,234,0.14)] text-[#c084fc] border-[rgba(147,51,234,0.28)]";
+        return "bg-[rgba(192,132,252,0.12)] text-[#C084FC] border-[rgba(192,132,252,0.28)] shadow-[0_0_12px_rgba(192,132,252,0.12)]";
+      case "other_pro":
+        return "bg-[rgba(247,144,9,0.12)] text-[#FBBF24] border-[rgba(247,144,9,0.28)] shadow-[0_0_12px_rgba(247,144,9,0.12)]";
       default:
-        return "bg-white/[0.04] text-[#9AA0B2] border-white/10";
+        return "bg-white/[0.05] text-[#E2E8F0] border-white/15 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]";
     }
   };
 
   const getNetworkingStatusConfig = (status?: ContactNetworkingStatus) => {
     switch (status) {
       case "contacted":
-        return { label: "Message envoyé", color: "bg-[rgba(14,165,233,0.12)] text-[#38bdf8] border-[rgba(14,165,233,0.25)]" };
+        return { 
+          label: "Message envoyé", 
+          color: "bg-[rgba(56,189,248,0.12)] text-[#38BDF8] border-[rgba(56,189,248,0.28)] shadow-[0_0_12px_rgba(56,189,248,0.10)]" 
+        };
       case "exchanging":
-        return { label: "Échange en cours", color: "bg-[rgba(147,51,234,0.14)] text-[#c084fc] border-[rgba(147,51,234,0.28)]" };
+        return { 
+          label: "Échange en cours", 
+          color: "bg-[rgba(192,132,252,0.12)] text-[#C084FC] border-[rgba(192,132,252,0.28)] shadow-[0_0_12px_rgba(192,132,252,0.10)]" 
+        };
       case "interview_done":
-        return { label: "Entretien réseau réalisé", color: "bg-[rgba(18,183,106,0.14)] text-[#12B76A] border-[rgba(18,183,106,0.28)]" };
+        return { 
+          label: "Entretien réseau réalisé", 
+          color: "bg-[rgba(18,183,106,0.14)] text-[#34D399] border-[rgba(18,183,106,0.30)] shadow-[0_0_12px_rgba(18,183,106,0.14)]" 
+        };
       case "not_interested":
-        return { label: "Sans suite", color: "bg-white/[0.04] text-[#9AA0B2] border-white/10" };
+        return { 
+          label: "Sans suite", 
+          color: "bg-white/[0.04] text-[#9AA0B2] border-white/10" 
+        };
       case "to_contact":
       default:
-        return { label: "À contacter", color: "bg-[rgba(247,144,9,0.14)] text-[#f79009] border-[rgba(247,144,9,0.28)]" };
+        return { 
+          label: "À contacter", 
+          color: "bg-[rgba(247,144,9,0.12)] text-[#FBBF24] border-[rgba(247,144,9,0.28)] shadow-[0_0_12px_rgba(247,144,9,0.10)]" 
+        };
     }
+  };
+
+  const getPillarBadgeStyle = (pillarStr?: string) => {
+    const p = (pillarStr || "").toLowerCase();
+    if (p.includes("recrut") || p.includes("emploi") || p.includes("stage") || p.includes("alternan") || p.includes("décideur")) {
+      return "bg-[rgba(18,183,106,0.14)] text-[#34D399] border-[rgba(18,183,106,0.28)]";
+    }
+    if (p.includes("alumni") || p.includes("école") || p.includes("réseau") || p.includes("relation") || p.includes("pair")) {
+      return "bg-[rgba(56,189,248,0.14)] text-[#38BDF8] border-[rgba(56,189,248,0.28)]";
+    }
+    if (p.includes("métier") || p.includes("secteur") || p.includes("finance") || p.includes("stratég") || p.includes("marché")) {
+      return "bg-[rgba(216,26,69,0.14)] text-[#FF6685] border-[rgba(216,26,69,0.28)]";
+    }
+    if (p.includes("conseil") || p.includes("mentor") || p.includes("expertise") || p.includes("partage")) {
+      return "bg-[rgba(192,132,252,0.14)] text-[#C084FC] border-[rgba(192,132,252,0.28)]";
+    }
+    return "bg-[rgba(247,144,9,0.14)] text-[#FBBF24] border-[rgba(247,144,9,0.28)]";
   };
 
   // Change networking status quickly
@@ -211,65 +268,86 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
     showToast("Note consignée dans le suivi", "success");
   };
 
-  // Generate customized message with Gemini AI
-  const handleGenerateOutreach = async () => {
-    setIsGeneratingMessage(true);
-    showToast("Génération du message d'approche personnalisé par l'IA...", "ai");
-
+  // Strategic networking relevance evaluation & custom pillars
+  const handleRefreshStrategic = async () => {
+    setIsAnalyzingStrategic(true);
+    showToast("Analyse stratégique du profil et détection des axes réseau par l'IA...", "ai");
     try {
-      const response = await fetch("/api/gemini", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "outreachMessage",
-          payload: {
-            contactName: contact.fullName,
-            contactJob: contact.jobTitle,
-            contactCompany: contact.companyName,
-            connectionPoints: contact.connectionPoints || [],
-            profile: profile,
-            format: messageType
-          }
-        })
-      });
-
-      if (!response.ok) throw new Error("API message failed");
-      const data = await response.json();
-      const generated = data.message || "";
-
-      setActiveMessage(generated);
-
-      // Save to contact
+      const result = await requestAiStrategicInterests(contact, profile);
       const historyEvent = {
         id: "hist_" + Math.random().toString(36).substring(2, 9),
-        type: "message_generated" as const,
-        label: `Message d'approche généré (${messageType === "invite" ? "Invitation LinkedIn" : messageType === "inmail" ? "InMail / Email" : "Relance"})`,
+        type: "category_changed" as const,
+        label: "Axes d'intérêt stratégique réseau réévalués avec l'IA",
         timestamp: new Date().toISOString()
       };
-
       const updated: Contact = {
         ...contact,
-        aiCustomMessage: generated,
+        networkingRelevance: result.networkingRelevance,
+        connectionPoints: result.connectionPoints.length > 0 ? result.connectionPoints : (contact.connectionPoints || []),
+        summary: result.summary || contact.summary,
+        relevanceScore: result.relevanceScore || contact.relevanceScore,
         history: [historyEvent, ...(contact.history || [])]
       };
       dbStore.updateContact(updated);
       onUpdate(updated);
-
-      showToast("Message personnalisé prêt !", "success");
+      showToast("Intérêts stratégiques réseau actualisés avec succès !", "success");
     } catch (err) {
       console.error(err);
-      showToast("Erreur lors de la génération IA", "error");
+      showToast("Erreur lors de l'analyse stratégique", "error");
     } finally {
-      setIsGeneratingMessage(false);
+      setIsAnalyzingStrategic(false);
     }
   };
 
-  const handleCopyMessage = () => {
-    if (!activeMessage) return;
-    navigator.clipboard.writeText(activeMessage);
-    setHasCopiedMessage(true);
-    showToast("Message copié dans le presse-papiers !", "success");
-    setTimeout(() => setHasCopiedMessage(false), 2500);
+  const handleAddCustomPillar = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPillarTitle.trim()) return;
+
+    const newItem: NetworkingRelevanceItem = {
+      pillar: newPillarTitle.trim(),
+      type: newPillarType.trim() || "Axe personnalisé",
+      context: newPillarContext.trim() || `Relation professionnelle avec ${contact.fullName}`,
+      recommendation: newPillarRecommendation.trim() || "Conserver des échanges réguliers et structurés.",
+      confidence: "high",
+      reason: "Ajouté manuellement"
+    };
+
+    const updatedPillars = [...(contact.networkingRelevance || []), newItem];
+    const updated: Contact = {
+      ...contact,
+      networkingRelevance: updatedPillars
+    };
+    dbStore.updateContact(updated);
+    onUpdate(updated);
+    setNewPillarTitle("");
+    setNewPillarContext("");
+    setNewPillarRecommendation("");
+    setIsAddPillarModalOpen(false);
+    showToast("Axe stratégique ajouté", "success");
+  };
+
+  const handleRemovePillar = (index: number) => {
+    const updatedPillars = (contact.networkingRelevance || []).filter((_, i) => i !== index);
+    const updated: Contact = { ...contact, networkingRelevance: updatedPillars };
+    dbStore.updateContact(updated);
+    onUpdate(updated);
+    showToast("Axe stratégique retiré", "info");
+  };
+
+  const handleApplyRecommendationToMessage = (rec: string) => {
+    const prev = contact.aiCustomMessage || "";
+    const intro = `Bonjour ${contact.firstName || contact.fullName},\n\n`;
+    const newMsg = !prev 
+      ? `${intro}Je me permets de vous contacter car je prépare mon insertion dans le secteur ${contact.sector || "Banque & Finance"}.\n\n${rec}\n\nBien cordialement,\n${profile.fullName || ""}`
+      : `${prev}\n\n[Approche recommandée : ${rec}]`;
+
+    const updated: Contact = {
+      ...contact,
+      aiCustomMessage: newMsg
+    };
+    dbStore.updateContact(updated);
+    onUpdate(updated);
+    showToast("Recommandation intégrée au message d'approche !", "success");
   };
 
   const currentStatusConfig = getNetworkingStatusConfig(contact.networkingStatus);
@@ -343,12 +421,14 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
               </button>
 
               <button
-                onClick={handleGenerateOutreach}
-                disabled={isGeneratingMessage}
+                onClick={() => {
+                  const el = document.getElementById("networking-workspace-section");
+                  if (el) el.scrollIntoView({ behavior: "smooth" });
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-900/30 to-rose-900/30 hover:from-purple-900/45 hover:to-rose-900/45 text-purple-200 hover:text-white border border-purple-500/30 text-xs font-semibold shadow-[0_4px_16px_rgba(147,51,234,0.2)] transition-spring cursor-pointer"
               >
                 <Sparkles className="w-3.5 h-3.5 text-[#C084FC] animate-pulse" />
-                <span>{isGeneratingMessage ? "Génération..." : "Message IA"}</span>
+                <span>Framework Réseau</span>
               </button>
 
               <button
@@ -371,11 +451,26 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
 
           {/* Monoline Metadata Banner */}
           <div className="flex items-center gap-2 pt-1 text-xs overflow-x-auto pb-1 lg:pb-0 scrollbar-none flex-nowrap">
-            {/* 1. Catégorie */}
-            <span className={`px-2.5 py-1 rounded-xl border font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${getCategoryColor(contact.category)}`}>
-              <UserCheck className="w-3.5 h-3.5" />
-              {getCategoryLabel(contact.category)}
-            </span>
+            {/* 1. Catégories multidimensionnelles ou catégorie principale */}
+            {contact.categories && contact.categories.length > 0 ? (
+              contact.categories.map((cat, cIdx) => {
+                const style = getCategoryBadgeStyle(cat.category, cat.subcategory);
+                return (
+                  <span
+                    key={cIdx}
+                    title={`${cat.reason || style.label} (Confiance : ${cat.confidence === 'high' ? 'Haute' : cat.confidence === 'medium' ? 'Moyenne' : 'Basse'})`}
+                    className={`px-2.5 py-1 rounded-xl border font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${style.bgColor} ${style.textColor} ${style.borderColor}`}
+                  >
+                    <span>{style.label}</span>
+                  </span>
+                );
+              })
+            ) : (
+              <span className={`px-2.5 py-1 rounded-xl border font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0 ${getCategoryColor(contact.category)}`}>
+                <UserCheck className="w-3.5 h-3.5" />
+                {getCategoryLabel(contact.category)}
+              </span>
+            )}
 
             {/* 2. Score de pertinence */}
             <span className="px-2.5 py-1 rounded-xl bg-white/[0.04] border border-white/10 text-[#F5F6FA] font-semibold flex items-center gap-1.5 whitespace-nowrap shrink-0">
@@ -398,8 +493,8 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
             {/* 5. Opportunité liée */}
             {contact.opportunityTitle ? (
               <span className="px-2.5 py-1 rounded-xl bg-white/[0.04] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 whitespace-nowrap shrink-0">
-                <LinkIcon className="w-3.5 h-3.5 text-[#34D399]" />
-                Offre : <span className="text-[#34D399] font-medium">{contact.opportunityTitle}</span>
+                <LinkIcon className="w-3.5 h-3.5 text-[#FF6685]" />
+                Offre : <span className="text-[#F5F6FA] font-medium">{contact.opportunityTitle}</span>
               </span>
             ) : null}
 
@@ -474,9 +569,9 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
                       href={contact.linkedInUrl} 
                       target="_blank" 
                       rel="noreferrer" 
-                      className="text-[#38bdf8] hover:underline flex items-center gap-1 truncate"
+                      className="text-[#F5F6FA] hover:text-[#FF6685] hover:underline flex items-center gap-1.5 truncate transition-colors"
                     >
-                      <Linkedin className="w-3 h-3 shrink-0" />
+                      <Linkedin className="w-3.5 h-3.5 text-[#9AA0B2] shrink-0" />
                       <span className="truncate">{contact.linkedInUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//, "")}</span>
                     </a>
                   </div>
@@ -486,8 +581,11 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
                 {contact.email && (
                   <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
                     <span className="text-[#9AA0B2] uppercase font-semibold text-[10px]">Email professionnel</span>
-                    <a href={`mailto:${contact.email}`} className="text-[#38bdf8] hover:underline flex items-center gap-1 truncate">
-                      <Mail className="w-3 h-3 shrink-0" />
+                    <a 
+                      href={`mailto:${contact.email}`} 
+                      className="text-[#F5F6FA] hover:text-[#FF6685] hover:underline flex items-center gap-1.5 truncate transition-colors"
+                    >
+                      <Mail className="w-3.5 h-3.5 text-[#9AA0B2] shrink-0" />
                       <span className="truncate">{contact.email}</span>
                     </a>
                   </div>
@@ -497,9 +595,28 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
                 {contact.phone && (
                   <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
                     <span className="text-[#9AA0B2] uppercase font-semibold text-[10px]">Téléphone</span>
-                    <a href={`tel:${contact.phone}`} className="text-[#38bdf8] hover:underline flex items-center gap-1">
-                      <Phone className="w-3 h-3 shrink-0" />
+                    <a 
+                      href={`tel:${contact.phone}`} 
+                      className="text-[#F5F6FA] hover:text-[#FF6685] hover:underline flex items-center gap-1.5 transition-colors"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-[#9AA0B2] shrink-0" />
                       <span>{contact.phone}</span>
+                    </a>
+                  </div>
+                )}
+
+                {/* Lien web / Portail de contact */}
+                {contact.contactUrl && (
+                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1 sm:col-span-2">
+                    <span className="text-[#9AA0B2] uppercase font-semibold text-[10px]">Lien / Portail de contact</span>
+                    <a 
+                      href={contact.contactUrl} 
+                      target="_blank" 
+                      rel="noreferrer" 
+                      className="text-[#F5F6FA] hover:text-[#FF6685] hover:underline flex items-center gap-1.5 truncate font-medium transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-[#9AA0B2] shrink-0" />
+                      <span className="truncate">{contact.contactUrl}</span>
                     </a>
                   </div>
                 )}
@@ -533,7 +650,7 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
             {/* SECTION 2: Parcours & Formation (Real data only) */}
             <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-[#F5F6FA] flex items-center gap-2 font-display">
-                <GraduationCap className="w-4 h-4 text-[#38BDF8]" />
+                <GraduationCap className="w-4 h-4 text-[#9AA0B2]" />
                 Parcours & Établissements
               </h3>
 
@@ -564,27 +681,164 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
               </div>
             </div>
 
-            {/* SECTION 3: Pourquoi ce contact est pertinent (Analyse IA) */}
-            <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-950/[0.12] to-white/[0.02] border border-purple-500/20 space-y-4">
+            {/* SECTION 3: Pourquoi ce contact est pertinent & Intérêt Stratégique Réseau */}
+            <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-5">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[#C084FC] flex items-center gap-2 font-display">
-                  <Sparkles className="w-4 h-4 text-[#C084FC]" />
+                <h3 className="text-xs font-bold uppercase tracking-wider text-[#F5F6FA] flex items-center gap-2 font-display">
+                  <Sparkles className="w-4 h-4 text-[#FF6685]" />
                   Pourquoi ce contact est pertinent
                 </h3>
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-200 border border-purple-500/30">
-                  Score : {contact.relevanceScore}%
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white/[0.05] text-[#F5F6FA] border border-white/10">
+                  Score : <span className="text-[#FF6685]">{contact.relevanceScore}%</span>
                 </span>
               </div>
 
-              <div className="space-y-3 text-xs">
+              <div className="space-y-4 text-xs">
+                {/* Multidimensional Classifications */}
+                {contact.categories && contact.categories.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[#9AA0B2] uppercase font-semibold text-[10px]">Classifications Multidimensionnelles :</span>
+                    <div className="grid grid-cols-1 gap-2">
+                      {contact.categories.map((cat, idx) => {
+                        const style = getCategoryBadgeStyle(cat.category, cat.subcategory);
+                        return (
+                          <div key={idx} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`px-2 py-0.5 rounded-lg border text-[11px] font-semibold ${style.bgColor} ${style.textColor} ${style.borderColor}`}>
+                                  {style.label}
+                                </span>
+                                {cat.subcategory && cat.subcategory !== style.label && (
+                                  <span className="text-[11px] text-[#F5F6FA] font-medium bg-white/[0.04] px-2 py-0.5 rounded-lg border border-white/10">
+                                    {cat.subcategory}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full font-medium text-[#9AA0B2] bg-white/[0.04] border border-white/10">
+                                Confiance : {cat.confidence === "high" ? "Haute" : cat.confidence === "medium" ? "Moyenne" : "Basse"}
+                              </span>
+                            </div>
+                            {cat.reason && (
+                              <p className="text-[#9AA0B2] text-[11px] leading-relaxed pl-0.5">
+                                {cat.reason}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sub-Panel: Intérêt Stratégique Réseau (Actionable and Interactive) */}
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-white/8 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap pb-1 border-b border-white/5">
+                    <div className="flex items-center gap-2">
+                      <Compass className="w-4 h-4 text-[#FF6685]" />
+                      <span className="text-[#F5F6FA] font-bold text-xs uppercase tracking-wider font-display">
+                        Intérêt Stratégique Réseau
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleRefreshStrategic}
+                        disabled={isAnalyzingStrategic}
+                        className="px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/10 text-[#F5F6FA] border border-white/10 text-[11px] font-semibold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                        title="Réévaluer les opportunités de réseautage avec l'IA"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${isAnalyzingStrategic ? "animate-spin text-[#FF6685]" : ""}`} />
+                        <span>{isAnalyzingStrategic ? "Analyse..." : "Actualiser (IA)"}</span>
+                      </button>
+                      <button
+                        onClick={() => setIsAddPillarModalOpen(true)}
+                        className="px-2.5 py-1 rounded-lg bg-white/[0.03] hover:bg-white/10 text-[#F5F6FA] border border-white/10 text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer"
+                        title="Ajouter manuellement un axe de valeur"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Ajouter un axe</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {contact.networkingRelevance && contact.networkingRelevance.length > 0 ? (
+                    <div className="space-y-2.5 pt-1">
+                      {contact.networkingRelevance.map((rel, rIdx) => {
+                        const pillarLabel = rel.pillar || rel.type || "Opportunité Réseau";
+                        const contextText = rel.context || rel.reason || `Relation professionnelle (${contact.companyName || "Entreprise"})`;
+                        return (
+                          <div 
+                            key={rIdx} 
+                            className="relative overflow-hidden p-3.5 rounded-xl bg-white/[0.03] border border-white/10 shadow-[0_4px_16px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.12)] space-y-2 group"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wider ${getPillarBadgeStyle(pillarLabel)}`}>
+                                  {pillarLabel}
+                                </span>
+                                {rel.type && rel.type !== pillarLabel && (
+                                  <span className="text-[10px] text-[#9AA0B2] uppercase font-semibold">
+                                    • {rel.type}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleRemovePillar(rIdx)}
+                                className="text-[#9AA0B2] hover:text-[#FF6685] opacity-0 group-hover:opacity-100 transition-opacity p-1 cursor-pointer"
+                                title="Supprimer cet axe"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+
+                            <p className="text-[#F5F6FA] font-medium text-[11px] leading-relaxed">
+                              {contextText}
+                            </p>
+
+                            {rel.recommendation && (
+                              <div className="p-2.5 rounded-lg bg-black/20 border border-white/5 flex items-start justify-between gap-2.5">
+                                <p className="text-[#9AA0B2] text-[11px] leading-relaxed flex-1">
+                                  <strong className="text-[#F5F6FA] font-semibold">Recommandation : </strong>
+                                  {rel.recommendation}
+                                </p>
+                                <button
+                                  onClick={() => handleApplyRecommendationToMessage(rel.recommendation!)}
+                                  className="px-2 py-1 rounded-md bg-white/[0.06] hover:bg-white/12 text-[#F5F6FA] border border-white/10 text-[10px] font-medium flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+                                  title="Insérer cette recommandation dans le message d'approche"
+                                >
+                                  <span>Insérer</span>
+                                  <ArrowRight className="w-2.5 h-2.5 text-[#FF6685]" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 text-center space-y-2.5">
+                      <p className="text-xs text-[#9AA0B2]">
+                        Aucun axe stratégique calculé pour l'instant.
+                      </p>
+                      <button
+                        onClick={handleRefreshStrategic}
+                        disabled={isAnalyzingStrategic}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/10 text-[#F5F6FA] border border-white/10 text-xs font-semibold transition-colors cursor-pointer"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#FF6685]" />
+                        <span>Calculer les axes d'intérêt stratégique avec l'IA</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Connection points list */}
                 <div className="space-y-2">
                   <span className="text-[#9AA0B2] uppercase font-semibold text-[10px]">Points de connexion identifiés :</span>
                   {contact.connectionPoints && contact.connectionPoints.length > 0 ? (
                     <div className="space-y-1.5">
                       {contact.connectionPoints.map((pt, i) => (
-                        <div key={i} className="flex items-start gap-2 p-2.5 rounded-xl bg-white/[0.03] border border-purple-500/15">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-[#C084FC] shrink-0 mt-0.5" />
+                        <div key={i} className="flex items-start gap-2 p-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[#9AA0B2] shrink-0 mt-0.5" />
                           <span className="text-[#F5F6FA] leading-relaxed">{pt}</span>
                         </div>
                       ))}
@@ -595,23 +849,29 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
                 </div>
 
                 {/* Synthèse de classification */}
-                <div className="p-3 rounded-xl bg-black/20 border border-white/5 space-y-1 text-[#9AA0B2] leading-relaxed">
+                <div className="p-3.5 rounded-xl bg-black/20 border border-white/5 space-y-1.5 text-[#9AA0B2] leading-relaxed">
                   <span className="text-[#F5F6FA] font-semibold text-[11px] block">Synthèse du profil :</span>
-                  {contact.category === "recruiter" && (
-                    <p>Ce profil intervient sur les fonctions de recrutement et ressources humaines. Il constitue un point de contact stratégique pour des candidatures spontanées ou le suivi d'offres en cours.</p>
+                  {contact.summary ? (
+                    <p className="text-[#F5F6FA] leading-relaxed">{contact.summary}</p>
+                  ) : (
+                    <>
+                      {contact.category === "recruiter" && (
+                        <p>Ce profil intervient sur les fonctions de recrutement et ressources humaines. Il constitue un point de contact stratégique pour des candidatures spontanées ou le suivi d'offres en cours.</p>
+                      )}
+                      {contact.category === "alumni" && (
+                        <p>Partage le même parcours académique ou réseau d'études. Idéal pour solliciter un échange d'expérience, des retours sur le secteur ou un parrainage professionnel.</p>
+                      )}
+                      {contact.category === "sector_pro" && (
+                        <p>Évolue dans votre secteur cible (Banque, Finance, Gestion de patrimoine). Excellent contact pour élargir votre visibilité et votre veille sectorielle.</p>
+                      )}
+                      {contact.category === "student" && (
+                        <p>Étudiant ou pair dans votre filière, utile pour l'entraide, le partage d'opportunités et les retours d'expériences de stages.</p>
+                      )}
+                      {contact.category === "other_pro" || contact.category === "other" ? (
+                        <p>Contact issu de votre réseau étendu, à conserver pour de futures synergies interprofessionnelles.</p>
+                      ) : null}
+                    </>
                   )}
-                  {contact.category === "alumni" && (
-                    <p>Partage le même parcours académique ou réseau d'études. Idéal pour solliciter un échange d'expérience, des retours sur le secteur ou un parrainage professionnel.</p>
-                  )}
-                  {contact.category === "sector_pro" && (
-                    <p>Évolue dans votre secteur cible (Banque, Finance, Gestion de patrimoine). Excellent contact pour élargir votre visibilité et votre veille sectorielle.</p>
-                  )}
-                  {contact.category === "student" && (
-                    <p>Étudiant ou pair dans votre filière, utile pour l'entraide, le partage d'opportunités et les retours d'expériences de stages.</p>
-                  )}
-                  {contact.category === "other_pro" || contact.category === "other" ? (
-                    <p>Contact issu de votre réseau étendu, à conserver pour de futures synergies interprofessionnelles.</p>
-                  ) : null}
                 </div>
               </div>
             </div>
@@ -619,7 +879,7 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
             {/* SECTION 4: Relations avec NACORA */}
             <div className="p-5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-4">
               <h3 className="text-xs font-bold uppercase tracking-wider text-[#F5F6FA] flex items-center gap-2 font-display">
-                <Layers className="w-4 h-4 text-[#34D399]" />
+                <Layers className="w-4 h-4 text-[#9AA0B2]" />
                 Relations avec NACORA
               </h3>
 
@@ -631,7 +891,7 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
                     {contact.opportunityId && (
                       <button
                         onClick={handleUnlinkOpportunity}
-                        className="text-[11px] text-[#F04438] hover:underline cursor-pointer"
+                        className="text-[11px] text-[#FF6685] hover:underline cursor-pointer"
                       >
                         Dissocier
                       </button>
@@ -639,10 +899,10 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
                   </div>
 
                   {contact.opportunityTitle ? (
-                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-[rgba(18,183,106,0.08)] border border-[rgba(18,183,106,0.25)]">
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-white/[0.04] border border-white/10">
                       <div className="flex items-center gap-2 truncate">
-                        <LinkIcon className="w-3.5 h-3.5 text-[#34D399] shrink-0" />
-                        <span className="text-[#34D399] font-medium truncate">{contact.opportunityTitle}</span>
+                        <LinkIcon className="w-3.5 h-3.5 text-[#FF6685] shrink-0" />
+                        <span className="text-[#F5F6FA] font-medium truncate">{contact.opportunityTitle}</span>
                       </div>
                     </div>
                   ) : (
@@ -688,112 +948,18 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
           </div>
 
           {/* ========================================================================= */}
-          {/* RIGHT COLUMN: Message d'approche IA, Notes & Suivi, Historique            */}
+          {/* RIGHT COLUMN: Message d'approche IA (Framework NACORA), Notes & Suivi, Historique */}
           {/* ========================================================================= */}
           <div className="lg:col-span-5 space-y-6">
             
-            {/* SECTION 6: Message d'approche IA (Gemini) */}
-            <div className="p-5 rounded-2xl bg-white/[0.03] border border-purple-500/20 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-[#C084FC] flex items-center gap-2 font-display">
-                  <Sparkles className="w-4 h-4 text-[#C084FC]" />
-                  Message d'Approche IA
-                </h3>
-                <GlassButton
-                  variant="ai"
-                  size="sm"
-                  disabled={isGeneratingMessage}
-                  onClick={handleGenerateOutreach}
-                >
-                  {isGeneratingMessage ? "Rédaction..." : "Générer avec Gemini"}
-                </GlassButton>
-              </div>
-
-              {/* Format selection */}
-              <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/30 border border-white/5 text-xs">
-                <button
-                  onClick={() => setMessageType("invite")}
-                  className={`flex-1 py-1 px-2 rounded-lg text-center font-medium transition-all ${
-                    messageType === "invite" 
-                      ? "bg-white/10 text-[#F5F6FA] shadow-sm" 
-                      : "text-[#9AA0B2] hover:text-[#F5F6FA]"
-                  }`}
-                >
-                  Invitation (&lt;300 car.)
-                </button>
-                <button
-                  onClick={() => setMessageType("inmail")}
-                  className={`flex-1 py-1 px-2 rounded-lg text-center font-medium transition-all ${
-                    messageType === "inmail" 
-                      ? "bg-white/10 text-[#F5F6FA] shadow-sm" 
-                      : "text-[#9AA0B2] hover:text-[#F5F6FA]"
-                  }`}
-                >
-                  InMail / Email
-                </button>
-                <button
-                  onClick={() => setMessageType("followup")}
-                  className={`flex-1 py-1 px-2 rounded-lg text-center font-medium transition-all ${
-                    messageType === "followup" 
-                      ? "bg-white/10 text-[#F5F6FA] shadow-sm" 
-                      : "text-[#9AA0B2] hover:text-[#F5F6FA]"
-                  }`}
-                >
-                  Relance
-                </button>
-              </div>
-
-              {/* Message display & live editing */}
-              {activeMessage ? (
-                <div className="space-y-3">
-                  <textarea
-                    value={activeMessage}
-                    onChange={(e) => {
-                      setActiveMessage(e.target.value);
-                      const updated: Contact = { ...contact, aiCustomMessage: e.target.value };
-                      dbStore.updateContact(updated);
-                      onUpdate(updated);
-                    }}
-                    className="w-full min-h-[140px] glass-input p-3.5 text-xs text-[#F5F6FA] leading-relaxed focus:border-purple-400/50 resize-y"
-                    placeholder="Message généré par Gemini..."
-                  />
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className={`text-[11px] ${
-                      messageType === "invite" && activeMessage.length > 300 
-                        ? "text-[#F04438] font-semibold" 
-                        : "text-[#9AA0B2]"
-                    }`}>
-                      {activeMessage.length} caractères {messageType === "invite" && "(limite LinkedIn : 300)"}
-                    </span>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleCopyMessage}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-500/30 text-xs font-semibold transition-colors cursor-pointer"
-                      >
-                        {hasCopiedMessage ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-[#12B76A]" />
-                            <span className="text-[#12B76A]">Copié !</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copier</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 text-center space-y-2">
-                  <p className="text-xs text-[#9AA0B2] leading-relaxed">
-                    Cliquez sur <strong>"Générer avec Gemini"</strong> pour rédiger une approche ultra-personnalisée exploitant votre profil et les points de connexion avec ce contact.
-                  </p>
-                </div>
-              )}
+            {/* SECTION 6: Framework Réseau NACORA (LinkedIn & Email) */}
+            <div id="networking-workspace-section">
+              <NetworkingMessageGenerator
+                contact={contact}
+                profile={profile}
+                onUpdate={onUpdate}
+                showToast={showToast}
+              />
             </div>
 
             {/* SECTION 5: Notes & Suivi */}
@@ -939,6 +1105,86 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
           </div>
         </div>
       </Modal>
+
+      {/* --- ADD STRATEGIC PILLAR MODAL --- */}
+      <Modal
+        isOpen={isAddPillarModalOpen}
+        onClose={() => setIsAddPillarModalOpen(false)}
+        title="Ajouter un axe d'intérêt stratégique"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#9AA0B2] uppercase">
+              Pilier / Thématique *
+            </label>
+            <input
+              type="text"
+              value={newPillarTitle}
+              onChange={(e) => setNewPillarTitle(e.target.value)}
+              placeholder="Ex: Opportunité de mentorat, Décideur recrutement..."
+              className="glass-input w-full px-3 py-2 text-xs text-[#F5F6FA]"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#9AA0B2] uppercase">
+              Type / Catégorie
+            </label>
+            <input
+              type="text"
+              value={newPillarType}
+              onChange={(e) => setNewPillarType(e.target.value)}
+              placeholder="Ex: Opportunité, Recrutement, Échange métier..."
+              className="glass-input w-full px-3 py-2 text-xs text-[#F5F6FA]"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#9AA0B2] uppercase">
+              Contexte & Rationale
+            </label>
+            <textarea
+              value={newPillarContext}
+              onChange={(e) => setNewPillarContext(e.target.value)}
+              placeholder="Pourquoi cet axe est particulièrement pertinent pour ce contact..."
+              rows={2}
+              className="glass-input w-full p-2.5 text-xs text-[#F5F6FA] resize-none"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[#9AA0B2] uppercase">
+              Recommandation d'action
+            </label>
+            <textarea
+              value={newPillarRecommendation}
+              onChange={(e) => setNewPillarRecommendation(e.target.value)}
+              placeholder="Ex: Proposer un échange court sur l'évolution du marché..."
+              rows={2}
+              className="glass-input w-full p-2.5 text-xs text-[#F5F6FA] resize-none"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <GlassButton
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsAddPillarModalOpen(false)}
+            >
+              Annuler
+            </GlassButton>
+            <GlassButton
+              variant="primary"
+              size="sm"
+              disabled={!newPillarTitle.trim()}
+              onClick={handleAddCustomPillar}
+            >
+              Enregistrer l'axe
+            </GlassButton>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
@@ -971,6 +1217,7 @@ const ContactEditModal: React.FC<ContactEditModalProps> = ({
   const [email, setEmail] = useState(contact.email || "");
   const [phone, setPhone] = useState(contact.phone || "");
   const [linkedInUrl, setLinkedInUrl] = useState(contact.linkedInUrl || "");
+  const [contactUrl, setContactUrl] = useState(contact.contactUrl || "");
   const [networkingStatus, setNetworkingStatus] = useState<ContactNetworkingStatus>(contact.networkingStatus || "to_contact");
 
   if (!isOpen) return null;
@@ -1008,6 +1255,7 @@ const ContactEditModal: React.FC<ContactEditModalProps> = ({
       email: email.trim() || undefined,
       phone: phone.trim() || undefined,
       linkedInUrl: linkedInUrl.trim() || undefined,
+      contactUrl: contactUrl.trim() || undefined,
       networkingStatus,
       history: [historyEvent, ...(contact.history || [])]
     };
@@ -1174,6 +1422,17 @@ const ContactEditModal: React.FC<ContactEditModalProps> = ({
               placeholder="https://www.linkedin.com/in/..."
               value={linkedInUrl}
               onChange={(e) => setLinkedInUrl(e.target.value)}
+              className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5 col-span-1 sm:col-span-2">
+            <label className="text-xs text-[#9AA0B2] font-semibold">Lien internet / Site web / Portail de contact (optionnel)</label>
+            <input
+              type="url"
+              placeholder="ex: https://entreprise.fr/candidature"
+              value={contactUrl}
+              onChange={(e) => setContactUrl(e.target.value)}
               className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
             />
           </div>

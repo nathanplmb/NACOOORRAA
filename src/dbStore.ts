@@ -36,322 +36,66 @@ export const calculateProfileCompletion = (p: CandidateProfile): { score: number
 
 export const createDefaultProfile = (
   id: string = "profile",
-  email: string = "nathpa1423@gmail.com",
-  fullName: string = "Nathan PALUMBO"
+  email: string = "",
+  fullName: string = ""
 ): CandidateProfile => {
   const baseProfile: CandidateProfile = {
     id,
-    firstName: "Nathan",
-    lastName: "PALUMBO",
-    fullName: fullName || "Nathan PALUMBO",
-    email: email || "nathpa1423@gmail.com",
-    phone: "06 12 34 56 78",
-    title: "Étudiant PGE | Finance, Business Development & Fintech",
+    firstName: fullName ? fullName.split(" ")[0] : "",
+    lastName: fullName ? fullName.split(" ").slice(1).join(" ") : "",
+    fullName: fullName || "",
+    email: email || "",
+    phone: "",
+    title: "Candidat(e) en recherche d'opportunités",
     avatarUrl: "",
-    driverLicense: "Permis B (Véhiculé)",
-    city: "Reims",
+    driverLicense: "",
+    city: "",
     country: "France",
-    mobility: "Régionale (Auvergne-Rhône-Alpes / Grand Est), France entière",
-    linkedInUrl: "https://www.linkedin.com/in/nathan-palumbo",
-    portfolioUrl: "https://nathan-palumbo.fr",
-    githubUrl: "https://github.com/nathanpalumbo",
+    mobility: "France entière",
+    linkedInUrl: "",
+    portfolioUrl: "",
+    githubUrl: "",
 
-    currentSituation: "Étudiant PGE à NEOMA Business School",
-    currentAlternance: "Crédit Agricole Centre France — Agence de Commentry",
-    bio: "Étudiant passionné par le secteur bancaire, la gestion de patrimoine et les innovations Fintech. Fort de plusieurs expériences en relation client, vente conseil et animation événementielle, je prépare activement mon intégration en Master Finance & Banque.",
+    currentSituation: "",
+    currentAlternance: "",
+    bio: "",
 
-    // Objectifs & Préférences
-    targetTitles: ["Assistant Clientèle", "Conseiller Clientèle Patrimoniale", "Analyste Financier", "Business Developer", "Chargé d'Affaires Entreprises"],
-    targetSectors: ["Banque & Assurance", "Finance de Marché", "Fintech", "Gestion de Patrimoine"],
-    targetCompanies: ["Crédit Agricole", "BNP Paribas", "Société Générale", "LCL", "BPCE"],
+    targetTitles: [],
+    targetSectors: [],
+    targetCompanies: [],
     contractTypes: ["Alternance", "Stage", "CDI", "VIE"],
-    startDateTarget: "Septembre 2025",
-    durationTarget: "12 à 24 mois",
-    minSalary: "1 400 € / mois",
+    startDateTarget: "",
+    durationTarget: "",
+    minSalary: "",
     workMode: "hybride",
-    idealPositionSearch: "Je recherche un poste d'alternant ou de conseiller bancaire/financier stimulant au sein d'une banque de réseau ou d'une banque privée, me permettant de conjuguer relation client haut de gamme, analyse financière rigoureuse et appétence pour les outils d'innovation Fintech.",
-    avoidSectors: ["Démarchage agressif", "Téléprospection à froid intensive"],
-    redFlags: ["Absence de perspectives d'évolution", "Encadrement inexistant"],
+    idealPositionSearch: "",
+    avoidSectors: [],
+    redFlags: [],
 
-    // Expériences
-    experiences: [
-      {
-        id: "exp_1",
-        role: "Alternant : Assistant Clientèle",
-        company: "Crédit Agricole Centre France — Agence de Commentry",
-        location: "Commentry, France",
-        contractType: "Alternance",
-        startDate: "2025-09",
-        endDate: "",
-        isCurrent: true,
-        period: "2025-09 → Aujourd'hui",
-        description: "Gestion et développement d'un portefeuille clients particuliers. Accueil physique et téléphonique, conseil en produits d'épargne, crédits à la consommation et services bancaires du quotidien.",
-        kpis: ["+12% de souscriptions d'assurances sur le trimestre", "Taux de satisfaction client de 96%"],
-        skills: ["Relation client", "Analyse financière", "Vente conseil", "Logiciels bancaires"]
-      },
-      {
-        id: "exp_2",
-        role: "Stagiaire : Assistant Clientèle",
-        company: "Crédit Agricole Centre France — Agence de Yzeure",
-        location: "Yzeure, France",
-        contractType: "Stage",
-        startDate: "2024-04",
-        endDate: "2024-06",
-        isCurrent: false,
-        period: "2024-04 → 2024-06",
-        description: "Traitement des opérations courantes de guichet, accompagnement des clients dans la transition digitale et l'utilisation de l'application mobile Ma Banque.",
-        kpis: ["Accompagnement de +150 clients vers la banque en ligne"],
-        skills: ["Accueil clientèle", "Opérations bancaires", "Sensibilisation digitale"]
-      },
-      {
-        id: "exp_3",
-        role: "Chef de service : Communication & Médias",
-        company: "Association étudiante PRO.TE.CO Montluçon",
-        location: "Montluçon, France",
-        contractType: "Bénévolat",
-        startDate: "2023-09",
-        endDate: "2024-06",
-        isCurrent: false,
-        period: "2023-09 → 2024-06",
-        description: "Pilotage de l'équipe média (5 membres), création des campagnes de communication pour les événements étudiants et gestion du budget communication.",
-        kpis: ["+45% d'engagement sur les réseaux sociaux", "Budget géré : 5 000 €"],
-        skills: ["Management d'équipe", "Communication digitale", "Gestion de budget", "Montage vidéo"]
-      },
-      {
-        id: "exp_4",
-        role: "Membre du service : Communication & Médias",
-        company: "Association étudiante PRO.TE.CO Montluçon",
-        location: "Montluçon, France",
-        contractType: "Bénévolat",
-        startDate: "2022-09",
-        endDate: "2023-06",
-        isCurrent: false,
-        period: "2022-09 → 2023-06",
-        description: "Réalisation de visuels promotionnels, captations d'événements et rédaction de la newsletter mensuelle de l'IUT.",
-        skills: ["Canva", "Création de contenu", "Réseaux sociaux"]
-      },
-      {
-        id: "exp_5",
-        role: "Vendeur / Responsable de boutique",
-        company: "Bonhomme Boutique Vichy",
-        location: "Vichy, France",
-        contractType: "CDD Saisonnier",
-        startDate: "2023-06",
-        endDate: "2023-08",
-        isCurrent: false,
-        period: "2023-06 → 2023-08",
-        description: "Conseil client haut de gamme en prêt-à-porter masculin, encaissement, gestion du réassort et merchandising vitrine.",
-        skills: ["Vente conseil", "Négociation commerciale", "Gestion de stock"]
-      },
-      {
-        id: "exp_6",
-        role: "Stagiaire : Assistant commercial",
-        company: "Ford Motor Company Toulon-sur-Allier",
-        location: "Toulon-sur-Allier, France",
-        contractType: "Stage",
-        startDate: "2023-01",
-        endDate: "2023-02",
-        isCurrent: false,
-        period: "2023-01 → 2023-02",
-        description: "Accueil concession, qualification des prospects véhicules d'occasion et neufs, organisation des essais véhicules.",
-        skills: ["Relance commerciale", "Prospection", "Secteur automobile"]
-      },
-      {
-        id: "exp_7",
-        role: "Employé polyvalent",
-        company: "E.Leclerc Occasion Avermes",
-        location: "Avermes, France",
-        contractType: "Job étudiant",
-        startDate: "2022-06",
-        endDate: "2022-08",
-        isCurrent: false,
-        period: "2022-06 → 2022-08",
-        description: "Test et mise en rayon des produits multimédias et informatiques, négociation de rachat auprès des particuliers.",
-        skills: ["Évaluation de biens", "Négociation", "Service client"]
-      },
-      {
-        id: "exp_8",
-        role: "Opérateur de commande",
-        company: "La Cabanne Avermes",
-        location: "Avermes, France",
-        contractType: "Job étudiant",
-        startDate: "2021-06",
-        endDate: "2021-08",
-        isCurrent: false,
-        period: "2021-06 → 2021-08",
-        description: "Préparation de commandes, logistique et contrôle qualité des expéditions sous contraintes de délais stricts.",
-        skills: ["Rigueur", "Organisation", "Logistique"]
-      },
-      {
-        id: "exp_9",
-        role: "Responsable de stand",
-        company: "Festival Château Perché & Et Après Festival",
-        location: "Avrilly, France",
-        contractType: "Événementiel",
-        startDate: "2023-08",
-        endDate: "2024-08",
-        isCurrent: false,
-        period: "2023-08 & 2024-08",
-        description: "Gestion de stand, accueil des festivaliers, tenue de caisse et coordination de l'équipe de bénévoles.",
-        skills: ["Coordination", "Gestion du stress", "Management"]
-      },
-      {
-        id: "exp_10",
-        role: "Carrossier automobile",
-        company: "Garage Cocquelet Avermes",
-        location: "Avermes, France",
-        contractType: "Stage découverte / Apprentissage",
-        startDate: "2020-09",
-        endDate: "2021-06",
-        isCurrent: false,
-        period: "2020-09 → 2021-06",
-        description: "Réparation, ponçage, préparation de surfaces et travaux manuels minutieux sur véhicules de particuliers.",
-        skills: ["Travail manuel", "Rigueur", "Précision"]
-      }
-    ],
+    experiences: [],
+    educations: [],
+    hardSkills: [],
+    toolsAndSoftware: [],
+    softSkills: [],
+    languagesList: [],
+    certificationsList: [],
+    projectsList: [],
+    volunteerWork: [],
+    interests: [],
 
-    // Formations
-    educations: [
-      {
-        id: "edu_1",
-        school: "NEOMA Business School",
-        degree: "Programme Grande École (PGE) - Master in Management",
-        domain: "Finance, Business Development & Management",
-        startDate: "2025",
-        endDate: "2028",
-        isCurrent: true,
-        description: "Spécialisation Finance & Banque, analyse financière approfondie, stratégie d'entreprise et écosystème Fintech."
-      },
-      {
-        id: "edu_2",
-        school: "IUT Clermont Auvergne (Campus de Montluçon)",
-        degree: "B.U.T. Techniques de Commercialisation",
-        domain: "Marketing, Vente & Négociation",
-        startDate: "2022",
-        endDate: "2025",
-        isCurrent: false,
-        description: "Parcours Business Development et gestion de la relation client, option Banque & Assurance."
-      }
-    ],
+    skills: [],
+    targetMasters: [],
+    languages: [],
+    certifications: [],
+    projects: [],
 
-    // Compétences Hard
-    hardSkills: [
-      { id: "hs_1", name: "Relation client", level: "Expert", category: "Commercial" },
-      { id: "hs_2", name: "Négociation commerciale", level: "Avancé", category: "Commercial" },
-      { id: "hs_3", name: "Vente de services", level: "Avancé", category: "Commercial" },
-      { id: "hs_4", name: "Organisation", level: "Expert", category: "Gestion" },
-      { id: "hs_5", name: "Communication digitale", level: "Avancé", category: "Marketing" },
-      { id: "hs_6", name: "Gestion de projet", level: "Avancé", category: "Gestion" },
-      { id: "hs_7", name: "Management d'équipe", level: "Intermédiaire", category: "Management" },
-      { id: "hs_8", name: "Coordination", level: "Avancé", category: "Gestion" },
-      { id: "hs_9", name: "Gestion de budget", level: "Intermédiaire", category: "Finance" },
-      { id: "hs_10", name: "Prise de décision", level: "Avancé", category: "Management" },
-      { id: "hs_11", name: "Création de contenu", level: "Avancé", category: "Marketing" },
-      { id: "hs_12", name: "Réseaux sociaux", level: "Expert", category: "Marketing" },
-      { id: "hs_13", name: "Montage vidéo", level: "Avancé", category: "Technique" }
-    ],
-
-    // Outils & Logiciels
-    toolsAndSoftware: [
-      "Microsoft Excel", "Microsoft PowerPoint", "Microsoft Word", 
-      "Canva", "CapCut", "Adobe Premiere Rush", 
-      "Notion", "Google Analytics", "CRM Bancaire", "LinkedIn Sales Navigator"
-    ],
-
-    // Soft Skills
-    softSkills: [
-      "Communication", "Esprit d'équipe", "Organisation", 
-      "Adaptabilité", "Leadership", "Autonomie", "Rigueur", "Sens commercial"
-    ],
-
-    // Langues
-    languagesList: [
-      { id: "lang_1", language: "Français", level: "Langue maternelle", cefrLevel: "Langue maternelle" },
-      { id: "lang_2", language: "Anglais", level: "B2", cefrLevel: "B2", certification: "TOEIC Listening & Reading", score: "745 / 990" },
-      { id: "lang_3", language: "Espagnol", level: "A2", cefrLevel: "A2" }
-    ],
-
-    // Certifications
-    certificationsList: [
-      { id: "cert_1", name: "TOEIC Listening & Reading", title: "TOEIC Listening & Reading", issuer: "ETS Global", organization: "ETS Global", date: "2024", issueDate: "2024", credentialId: "TOEIC-745", verificationUrl: "" },
-      { id: "cert_2", name: "TAGE MAGE", title: "TAGE MAGE", issuer: "FNEGE", organization: "FNEGE", date: "2024", issueDate: "2024", credentialId: "TM-337", verificationUrl: "" },
-      { id: "cert_3", name: "Attestation de niveau d'anglais B2", title: "Attestation de niveau d'anglais B2", issuer: "IUT Clermont Auvergne", organization: "IUT Clermont Auvergne", date: "2024", issueDate: "2024", credentialId: "", verificationUrl: "" }
-    ],
-
-    // Projets
-    projectsList: [
-      {
-        id: "proj_1",
-        name: "Projet Tutoré : Banque & Innovation Digitale",
-        title: "Projet Tutoré : Banque & Innovation Digitale",
-        description: "Étude prospective sur la numérisation des agences bancaires de proximité et l'intégration des outils IA dans le parcours client.",
-        role: "Chef de projet",
-        date: "2024",
-        technologies: ["Analyse financière", "Étude de marché", "PowerPoint"],
-        results: "Présentation devant un jury de professionnels bancaires, note attribuée : 18/20."
-      },
-      {
-        id: "proj_2",
-        name: "Campagne Média PRO.TE.CO",
-        title: "Campagne Média PRO.TE.CO",
-        description: "Production d'une série de reportages vidéo et visuels pour la promotion de la vie étudiante et des initiatives associatives.",
-        role: "Responsable Réalisation & Montage",
-        date: "2023 - 2024",
-        technologies: ["CapCut", "Premiere Rush", "Canva", "Instagram"],
-        results: "+45% d'abonnés en 6 mois."
-      }
-    ],
-
-    // Engagements
-    volunteerWork: [
-      {
-        id: "vol_1",
-        organization: "Association étudiante PRO.TE.CO Montluçon",
-        role: "Chef de service Communication & Médias",
-        dates: "2023 - 2024",
-        description: "Organisation d'événements culturels et sportifs régionaux, gestion d'équipe et représentation auprès de la direction de l'IUT.",
-        achievements: "Organisation réussie de 4 événements majeurs rassemblant +800 étudiants."
-      },
-      {
-        id: "vol_2",
-        organization: "Festival Château Perché & Et Après Festival",
-        role: "Bénévole responsable de stand & accueil",
-        dates: "2023 - 2024",
-        description: "Accueil du public, gestion des flux et tenue de caisse sur des événements culturels de grande envergure.",
-        achievements: "Encadrement fluide de +2 000 festivaliers par jour."
-      }
-    ],
-
-    // Centres d'intérêt
-    interests: [
-      "Finance & Cryptomonnaies", "Fintech & Banques en ligne", 
-      "Automobile & Carrosserie", "Production Vidéo & Montage", 
-      "Événementiel culturel", "Voyages & Découvertes"
-    ],
-
-    // Legacy fields array fallbacks for compatibility
-    skills: ["Relation client", "Négociation commerciale", "Vente de services", "Organisation", "Communication digitale", "Gestion de projet"],
-    targetMasters: ["Finance", "Gestion de patrimoine", "Fintech"],
-    languages: ["Français (Maternelle)", "Anglais (B2 - TOEIC 745)", "Espagnol (A2)"],
-    certifications: ["TOEIC (745/990)", "TAGE MAGE (337/600)", "Attestation Anglais B2"],
-    projects: [
-      { id: "proj_1", title: "Projet Tutoré : Banque & Innovation Digitale", description: "Étude prospective sur la numérisation des agences bancaires de proximité." }
-    ],
-
-    profileCompletionScore: 100
+    profileCompletionScore: 0
   };
 
   const { score } = calculateProfileCompletion(baseProfile);
   baseProfile.profileCompletionScore = score;
   return baseProfile;
 };
-
-const DEMO_IDS = new Set([
-  "opp_1", "opp_2", "opp_3", "opp_4", "opp_5", "opp_6", "opp_7", "opp_8", "opp_9",
-  "cont_1", "cont_2", "cont_3",
-  "co_ca", "co_lcl", "co_luko", "co_bnp", "co_sg", "co_palatine", "co_axa", "co_bpifrance", "co_payplug",
-  "cal_1", "cal_2", "cal_3"
-]);
 
 function cleanForFirestore<T>(input: T): T {
   if (input === undefined) {
@@ -372,12 +116,6 @@ function cleanForFirestore<T>(input: T): T {
   return cleanObj as T;
 }
 
-// Helper to filter out legacy demo data
-function filterOutDemoData<T extends { id?: string }>(items: T[] | undefined | null): T[] {
-  if (!items || !Array.isArray(items)) return [];
-  return items.filter(item => !item.id || !DEMO_IDS.has(item.id));
-}
-
 const INITIAL_PROFILE = createDefaultProfile();
 const INITIAL_COMPANIES: Company[] = [];
 const INITIAL_OPPORTUNITIES: Opportunity[] = [];
@@ -394,7 +132,7 @@ const INITIAL_SESSIONS: ChatSession[] = [
       {
         id: "msg_1",
         role: "model",
-        text: "Bonjour ! Je suis ton conseiller de carrière intelligent NACORA. Je suis là pour t'accompagner dans la recherche, la préparation et le suivi de tes opportunités d'alternance, de stage ou de premier emploi en Finance, Fintech ou Gestion de Patrimoine. Comment puis-je t'aider aujourd'hui ?",
+        text: "Bonjour ! Je suis ton conseiller de carrière intelligent NACORA. Je suis là pour t'accompagner dans la recherche, la préparation et le suivi de tes opportunités d'alternance, de stage ou de premier emploi. Comment puis-je t'aider aujourd'hui ?",
         timestamp: new Date().toISOString()
       }
     ],
@@ -414,6 +152,8 @@ class DBStore {
   private currentUserId: string | null = null;
   private syncTimeout: any = null;
   private listeners: Set<() => void> = new Set();
+  private isQuotaExceeded: boolean = false;
+  private lastSyncSuccess: boolean = true;
 
   constructor() {
     this.loadFromLocalStorage();
@@ -427,6 +167,13 @@ class DBStore {
     };
   }
 
+  getSyncStatus() {
+    return {
+      isQuotaExceeded: this.isQuotaExceeded,
+      lastSyncSuccess: this.lastSyncSuccess
+    };
+  }
+
   private notifyListenersOnly() {
     this.listeners.forEach(listener => listener());
   }
@@ -437,95 +184,75 @@ class DBStore {
       this.saveToUserLocalStorage(this.currentUserId);
       if (this.syncTimeout) clearTimeout(this.syncTimeout);
       this.syncTimeout = setTimeout(() => {
-        if (this.currentUserId) {
+        if (this.currentUserId && !this.isQuotaExceeded) {
           this.syncToFirestore(this.currentUserId);
         }
-      }, 500);
+      }, 800);
     } else {
       this.saveToLocalStorage();
     }
   }
 
-  // Initialize for authenticated user
+  // Initialize for authenticated user (Dual-layer persistence: localStorage + Cloud Firestore)
   async initializeForUser(userId: string, email?: string | null, displayName?: string | null) {
     this.currentUserId = userId;
+    
+    // 1. Load immediately from user local storage for zero-latency offline-first persistence
+    this.loadFromUserLocalStorage(userId);
+    if (!this.profile.email && email) {
+      this.profile.email = email;
+    }
+    if ((!this.profile.firstName || !this.profile.fullName) && displayName) {
+      this.profile.fullName = displayName;
+      this.profile.firstName = displayName.split(" ")[0];
+      this.profile.lastName = displayName.split(" ").slice(1).join(" ");
+    }
+
+    // 2. Sync with Cloud Firestore
     try {
-      // Check local storage first to prevent any loss of locally imported items
-      const localContactsKey = `nacora_${userId}_contacts`;
-      const localContactsRaw = localStorage.getItem(localContactsKey) || localStorage.getItem("nacora_contacts");
-      const cachedContacts: Contact[] = localContactsRaw ? filterOutDemoData<Contact>(JSON.parse(localContactsRaw)) : [];
-
-      const localOppsKey = `nacora_${userId}_opportunities`;
-      const localOppsRaw = localStorage.getItem(localOppsKey) || localStorage.getItem("nacora_opportunities");
-      const cachedOpps: Opportunity[] = localOppsRaw ? filterOutDemoData<Opportunity>(JSON.parse(localOppsRaw)) : [];
-
-      // 1. Try to load from Firestore document
       const userRef = doc(db, "users", userId);
       const snapshot = await getDoc(userRef);
+
       if (snapshot.exists()) {
         const data = snapshot.data();
-        if (data.profile) {
-          this.profile = data.profile;
-        } else {
-          this.profile = createDefaultProfile(userId, email || "", displayName || "");
+        if (data.profile && Object.keys(data.profile).length > 0) {
+          // If Firestore has a more complete profile or data, use it
+          this.profile = { ...this.profile, ...data.profile };
         }
-        
-        const remoteOpps: Opportunity[] = filterOutDemoData<Opportunity>(data.opportunities);
-        const remoteContacts: Contact[] = filterOutDemoData<Contact>(data.contacts);
-        const remoteCompanies: Company[] = filterOutDemoData<Company>(data.companies);
-        const remoteCalendar: CalendarEvent[] = filterOutDemoData<CalendarEvent>(data.calendarEvents);
-
-        // Non-destructive merge between remote and cached local contacts
-        const mergedContacts: Contact[] = [...remoteContacts];
-        const seenContactIds = new Set(remoteContacts.map(c => c.id));
-        const seenContactNames = new Set(remoteContacts.map(c => (c.fullName || "").toLowerCase().trim()));
-        for (const localC of cachedContacts) {
-          if (localC && localC.id && !seenContactIds.has(localC.id) && !seenContactNames.has((localC.fullName || "").toLowerCase().trim())) {
-            mergedContacts.push(localC);
-            seenContactIds.add(localC.id);
-            seenContactNames.add((localC.fullName || "").toLowerCase().trim());
-          }
+        if (data.opportunities && data.opportunities.length > 0) {
+          this.opportunities = data.opportunities;
         }
-        this.contacts = mergedContacts;
-
-        // Non-destructive merge for opportunities
-        const mergedOpps: Opportunity[] = [...remoteOpps];
-        const seenOppIds = new Set(remoteOpps.map(o => o.id));
-        for (const localO of cachedOpps) {
-          if (localO && localO.id && !seenOppIds.has(localO.id)) {
-            mergedOpps.push(localO);
-            seenOppIds.add(localO.id);
-          }
+        if (data.contacts && data.contacts.length > 0) {
+          this.contacts = data.contacts;
         }
-        this.opportunities = mergedOpps;
-
-        this.companies = remoteCompanies;
-        this.calendarEvents = remoteCalendar;
-        this.documents = data.documents || [];
-        this.chatSessions = data.chatSessions || INITIAL_SESSIONS;
-      } else {
-        // 2. Check if user-scoped localStorage has cached state
-        const localKey = `nacora_${userId}_profile`;
-        if (localStorage.getItem(localKey)) {
-          this.loadFromUserLocalStorage(userId);
-        } else {
-          // 3. Brand new account: initialize clean profile with empty collections
-          this.profile = createDefaultProfile(userId, email || "", displayName || "");
-          this.opportunities = cachedOpps;
-          this.contacts = cachedContacts;
-          this.companies = [];
-          this.calendarEvents = [];
-          this.documents = [];
-          this.chatSessions = INITIAL_SESSIONS;
+        if (data.companies && data.companies.length > 0) {
+          this.companies = data.companies;
         }
+        if (data.calendarEvents && data.calendarEvents.length > 0) {
+          this.calendarEvents = data.calendarEvents;
+        }
+        if (data.documents && data.documents.length > 0) {
+          this.documents = data.documents;
+        }
+        if (data.chatSessions && data.chatSessions.length > 0) {
+          this.chatSessions = data.chatSessions;
+        }
+      } else if (!this.isQuotaExceeded) {
+        // If not in cloud yet, persist current local data to cloud
+        await this.syncToFirestore(userId);
       }
+
       this.recalculateCompanyCounters();
       this.saveToUserLocalStorage(userId);
-      await this.syncToFirestore(userId);
       this.notifyListenersOnly();
-    } catch (e) {
-      console.error("Error initializing user store:", e);
-      // Fallback to local storage if offline or firestore fails
+    } catch (e: any) {
+      const errMsg = e?.message || String(e);
+      if (errMsg.includes("resource-exhausted") || errMsg.includes("Quota limit exceeded") || errMsg.includes("quota")) {
+        this.isQuotaExceeded = true;
+        console.warn("Firestore daily quota reached. Switched to offline-first local storage mode.");
+      } else {
+        console.warn("Cloud sync offline mode, using local session data:", e);
+      }
       this.loadFromUserLocalStorage(userId);
       this.notifyListenersOnly();
     }
@@ -543,38 +270,12 @@ class DBStore {
     this.notifyListenersOnly();
   }
 
-  // LocalStorage Persistence (Fallback / Generic)
+  // LocalStorage Fallback
   private loadFromLocalStorage() {
     try {
       const p = localStorage.getItem("nacora_profile");
       if (p) this.profile = JSON.parse(p);
       else this.profile = INITIAL_PROFILE;
-
-      const o = localStorage.getItem("nacora_opportunities");
-      if (o) this.opportunities = filterOutDemoData(JSON.parse(o));
-      else this.opportunities = [];
-
-      const c = localStorage.getItem("nacora_contacts");
-      if (c) this.contacts = filterOutDemoData(JSON.parse(c));
-      else this.contacts = [];
-
-      const co = localStorage.getItem("nacora_companies");
-      if (co) this.companies = filterOutDemoData(JSON.parse(co));
-      else this.companies = [];
-
-      const cal = localStorage.getItem("nacora_calendar");
-      if (cal) this.calendarEvents = filterOutDemoData(JSON.parse(cal));
-      else this.calendarEvents = [];
-
-      const docu = localStorage.getItem("nacora_documents");
-      if (docu) this.documents = JSON.parse(docu);
-      else this.documents = [];
-
-      const sess = localStorage.getItem("nacora_sessions");
-      if (sess) this.chatSessions = JSON.parse(sess);
-      else this.chatSessions = INITIAL_SESSIONS;
-
-      this.recalculateCompanyCounters();
     } catch (e) {
       console.error("Error loading local storage:", e);
     }
@@ -583,18 +284,11 @@ class DBStore {
   private saveToLocalStorage() {
     try {
       localStorage.setItem("nacora_profile", JSON.stringify(this.profile));
-      localStorage.setItem("nacora_opportunities", JSON.stringify(this.opportunities));
-      localStorage.setItem("nacora_contacts", JSON.stringify(this.contacts));
-      localStorage.setItem("nacora_companies", JSON.stringify(this.companies));
-      localStorage.setItem("nacora_calendar", JSON.stringify(this.calendarEvents));
-      localStorage.setItem("nacora_documents", JSON.stringify(this.documents));
-      localStorage.setItem("nacora_sessions", JSON.stringify(this.chatSessions));
     } catch (e) {
       console.error("Error writing local storage:", e);
     }
   }
 
-  // User-scoped local storage
   private loadFromUserLocalStorage(userId: string) {
     try {
       const p = localStorage.getItem(`nacora_${userId}_profile`);
@@ -602,19 +296,19 @@ class DBStore {
       else this.profile = createDefaultProfile(userId);
 
       const o = localStorage.getItem(`nacora_${userId}_opportunities`);
-      if (o) this.opportunities = filterOutDemoData(JSON.parse(o));
+      if (o) this.opportunities = JSON.parse(o);
       else this.opportunities = [];
 
       const c = localStorage.getItem(`nacora_${userId}_contacts`);
-      if (c) this.contacts = filterOutDemoData(JSON.parse(c));
+      if (c) this.contacts = JSON.parse(c);
       else this.contacts = [];
 
       const co = localStorage.getItem(`nacora_${userId}_companies`);
-      if (co) this.companies = filterOutDemoData(JSON.parse(co));
+      if (co) this.companies = JSON.parse(co);
       else this.companies = [];
 
       const cal = localStorage.getItem(`nacora_${userId}_calendar`);
-      if (cal) this.calendarEvents = filterOutDemoData(JSON.parse(cal));
+      if (cal) this.calendarEvents = JSON.parse(cal);
       else this.calendarEvents = [];
 
       const docu = localStorage.getItem(`nacora_${userId}_documents`);
@@ -645,8 +339,9 @@ class DBStore {
     }
   }
 
-  // Firebase Sync
+  // Firebase Cloud Sync
   async syncToFirestore(userId: string) {
+    if (this.isQuotaExceeded) return;
     try {
       const userRef = doc(db, "users", userId);
       const rawPayload = {
@@ -661,31 +356,16 @@ class DBStore {
       };
       const cleanPayload = cleanForFirestore(JSON.parse(JSON.stringify(rawPayload)));
       await setDoc(userRef, cleanPayload, { merge: true });
-      console.log("State synced to Firestore successfully for user", userId);
-    } catch (e) {
-      console.error("Error syncing to Firestore:", e);
-    }
-  }
-
-  async loadFromFirestore(userId: string) {
-    try {
-      const userRef = doc(db, "users", userId);
-      const snapshot = await getDoc(userRef);
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.profile) this.profile = data.profile;
-        if (data.opportunities) this.opportunities = filterOutDemoData(data.opportunities);
-        if (data.contacts) this.contacts = filterOutDemoData(data.contacts);
-        if (data.companies) this.companies = filterOutDemoData(data.companies);
-        if (data.calendarEvents) this.calendarEvents = filterOutDemoData(data.calendarEvents);
-        if (data.documents) this.documents = data.documents;
-        if (data.chatSessions) this.chatSessions = data.chatSessions;
-        
-        this.recalculateCompanyCounters();
-        this.notifyListenersOnly();
+      this.lastSyncSuccess = true;
+    } catch (e: any) {
+      const errMsg = e?.message || String(e);
+      if (errMsg.includes("resource-exhausted") || errMsg.includes("Quota limit exceeded") || errMsg.includes("quota")) {
+        this.isQuotaExceeded = true;
+        this.lastSyncSuccess = false;
+        console.warn("Firestore daily write quota reached for today. Local storage is safeguarding your data.");
+      } else {
+        console.error("Error syncing to Firestore cloud:", e);
       }
-    } catch (e) {
-      console.error("Error loading from Firestore:", e);
     }
   }
 
@@ -710,8 +390,6 @@ class DBStore {
 
   updateProfile(p: Partial<CandidateProfile>) {
     this.profile = { ...this.profile, ...p };
-    
-    // Recalculate profile completion score dynamically
     const { score } = calculateProfileCompletion(this.profile);
     this.profile.profileCompletionScore = score;
     this.notify();
@@ -794,6 +472,19 @@ class DBStore {
   // Company Operations
   getCompanies(): Company[] {
     return this.companies;
+  }
+
+  addCompany(company: Company): Company {
+    const existing = this.companies.find(c => c.id === company.id || c.name.toLowerCase() === company.name.toLowerCase());
+    if (existing) {
+      const updated = { ...existing, ...company };
+      this.updateCompany(updated);
+      return updated;
+    }
+    this.companies.push(company);
+    this.recalculateCompanyCounters();
+    this.notify();
+    return company;
   }
 
   getCompanyByNameOrCreate(name: string): Company {

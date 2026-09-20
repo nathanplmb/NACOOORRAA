@@ -270,7 +270,7 @@ export const CVImportModal: React.FC<CVImportModalProps> = ({
 
         {/* STEP 1: INPUT MODE */}
         {step === 'input' && (
-          <div className="mt-6 space-y-6">
+          <div className="mt-6 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
             {/* Input Method Tabs */}
             <div className="flex items-center gap-2 p-1 rounded-xl bg-white/[0.04] border border-white/10 w-fit">
               <button
@@ -374,20 +374,22 @@ export const CVImportModal: React.FC<CVImportModalProps> = ({
             )}
 
             {/* Optional LinkedIn Enrichment Block */}
-            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+            <div className="p-4 sm:p-5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-4">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-[#F5F6FA] flex items-center gap-2">
                   <Globe className="w-4 h-4 text-[#38BDF8]" />
                   <span>Enrichissement optionnel via LinkedIn</span>
                 </label>
-                <span className="text-[10px] font-semibold text-[#38BDF8] bg-[#38BDF8]/10 px-2 py-0.5 rounded-md border border-[#38BDF8]/20">
+                <span className="text-[10px] font-semibold text-[#38BDF8] bg-[#38BDF8]/10 px-2.5 py-0.5 rounded-md border border-[#38BDF8]/20">
                   Optionnel
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="space-y-3.5 text-xs">
                 <div>
-                  <label className="text-[11px] text-[#9AA0B2] block mb-1">URL du profil LinkedIn :</label>
+                  <label className="text-[11px] font-semibold text-[#9AA0B2] block mb-1">
+                    URL du profil LinkedIn :
+                  </label>
                   <input
                     type="text"
                     value={linkedinUrl}
@@ -396,18 +398,25 @@ export const CVImportModal: React.FC<CVImportModalProps> = ({
                       setLinkedinNotice(null);
                     }}
                     placeholder="https://www.linkedin.com/in/votre-profil"
-                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/50 focus:outline-none focus:border-[#38BDF8]"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/50 focus:outline-none focus:border-[#38BDF8] transition-all"
                   />
                 </div>
 
                 <div>
-                  <label className="text-[11px] text-[#9AA0B2] block mb-1">Ou texte / export LinkedIn :</label>
-                  <input
-                    type="text"
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-semibold text-[#F5F6FA]">
+                      Collez ici le contenu complet de votre profil LinkedIn :
+                    </label>
+                    <span className="text-[10px] text-[#9AA0B2]">
+                      Expériences, formations, compétences, certifications...
+                    </span>
+                  </div>
+                  <textarea
                     value={linkedinText}
                     onChange={(e) => setLinkedinText(e.target.value)}
-                    placeholder="Collez ici le texte ou l'extrait de votre profil..."
-                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/50 focus:outline-none focus:border-[#38BDF8]"
+                    placeholder={`Collez ici le contenu de votre profil LinkedIn :\n\nExpérience\nMarketing Manager — Michelin\n...\n...\nFormation\nMaster Marketing & Stratégie — Université Paris Dauphine\n...`}
+                    rows={7}
+                    className="w-full p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/40 focus:outline-none focus:border-[#38BDF8] focus:ring-1 focus:ring-[#38BDF8] transition-all resize-y font-sans leading-relaxed min-h-[140px] max-h-[300px] overflow-y-auto custom-scrollbar"
                   />
                 </div>
               </div>

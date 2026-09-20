@@ -7,6 +7,7 @@ import {
   detectDuplicates, 
   LinkedInContactCandidate 
 } from "../utils/linkedInCsvParser";
+import { mergeContactData, getCategoryBadgeStyle } from "../utils/contactMerger";
 import { 
   Upload, 
   Sparkles, 
@@ -190,9 +191,15 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
 
       try {
         const rawPayload = currentBatch.map(c => ({
+          id: c.id,
           fullName: c.fullName,
+          firstName: c.firstName,
+          lastName: c.lastName,
           jobTitle: c.position || "Professionnel",
-          companyName: c.company || "À préciser"
+          companyName: c.company || "À préciser",
+          linkedInUrl: c.url,
+          email: c.email,
+          connectedOn: c.connectedOn
         }));
 
         const response = await fetch("/api/gemini", {
@@ -216,13 +223,20 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
                 enrichedCandidates[globalIdx] = {
                   ...enrichedCandidates[globalIdx],
                   normalizedJobTitle: item.normalizedJobTitle || enrichedCandidates[globalIdx].position,
-                  category: item.category || "other",
+                  category: item.category || enrichedCandidates[globalIdx].category || "other",
+                  categories: item.categories || enrichedCandidates[globalIdx].categories || [],
+                  professionalProfile: item.professionalProfile || enrichedCandidates[globalIdx].professionalProfile,
+                  pastCompanies: item.pastCompanies || enrichedCandidates[globalIdx].pastCompanies || [],
+                  education: item.education || enrichedCandidates[globalIdx].education || [],
+                  companySector: item.companySector || enrichedCandidates[globalIdx].companySector,
+                  networkingRelevance: item.networkingRelevance || enrichedCandidates[globalIdx].networkingRelevance || [],
+                  summary: item.summary || enrichedCandidates[globalIdx].summary,
                   relevanceScore: typeof item.relevanceScore === "number" ? item.relevanceScore : 50,
                   connectionPoints: Array.isArray(item.connectionPoints) && item.connectionPoints.length > 0 
                     ? item.connectionPoints 
                     : ["Importé via LinkedIn"],
                   academicPath: item.academicPath || "",
-                  previousCompanies: item.previousCompanies || []
+                  previousCompanies: item.previousCompanies || item.pastCompanies || []
                 };
               }
             });
@@ -275,7 +289,7 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
     setCandidates(prev => prev.map(c => c.id === id ? { ...c, duplicateAction: action } : c));
   };
 
-  // Perform Final Database Import
+  // Perform Final Database Import with non-destructive intelligent merge
   const handleExecuteImport = () => {
     const selectedContacts = candidates.filter(c => c.selected);
     if (selectedContacts.length === 0) {
@@ -298,30 +312,40 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
       const linkedCo = dbStore.getCompanyByNameOrCreate(companyName);
 
       if (item.isDuplicate && item.duplicateAction === "update" && item.existingContactId) {
-        // Update existing contact
+        // Intelligently merge existing contact with imported data
         const existing = dbStore.getContacts().find(c => c.id === item.existingContactId);
         if (existing) {
-          const updatedContact: Contact = {
-            ...existing,
-            jobTitle: item.position || existing.jobTitle,
-            normalizedJobTitle: item.normalizedJobTitle || item.position || existing.normalizedJobTitle,
+          const merged = mergeContactData(existing, {
+            fullName: item.fullName,
+            firstName: item.firstName,
+            lastName: item.lastName,
             companyId: linkedCo.id,
             companyName: linkedCo.name,
+            jobTitle: item.position || existing.jobTitle,
+            normalizedJobTitle: item.normalizedJobTitle || item.position || existing.normalizedJobTitle,
             category: item.category || existing.category,
+            categories: item.categories,
+            professionalProfile: item.professionalProfile,
+            networkingRelevance: item.networkingRelevance,
+            summary: item.summary,
+            education: item.education,
+            pastCompanies: item.pastCompanies,
             relevanceScore: item.relevanceScore || existing.relevanceScore,
-            connectionPoints: Array.from(new Set([...(existing.connectionPoints || []), ...(item.connectionPoints || [])])),
+            connectionPoints: item.connectionPoints,
             email: item.email || existing.email,
             linkedInUrl: item.url || existing.linkedInUrl,
             academicPath: item.academicPath || existing.academicPath,
-            notes: existing.notes ? `${existing.notes} | Actualisé via import LinkedIn (${new Date().toLocaleDateString('fr-FR')})` : "Importé et mis à jour via LinkedIn."
-          };
-          dbStore.updateContact(updatedContact);
+            notes: existing.notes 
+              ? `${existing.notes} | Fusionné via import LinkedIn (${new Date().toLocaleDateString('fr-FR')})` 
+              : "Importé et fusionné intelligemment via LinkedIn."
+          });
+          dbStore.updateContact(merged);
           updatedCount++;
           return;
         }
       }
 
-      // Create new contact
+      // Create new contact with multidimensional classifications
       dbStore.addContact({
         fullName: item.fullName,
         firstName: item.firstName || item.fullName.split(" ")[0] || "Inconnu",
@@ -331,6 +355,12 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
         jobTitle: item.position || "Professionnel",
         normalizedJobTitle: item.normalizedJobTitle || item.position || "Professionnel",
         category: item.category || "other",
+        categories: item.categories || [],
+        professionalProfile: item.professionalProfile,
+        networkingRelevance: item.networkingRelevance || [],
+        summary: item.summary || "",
+        education: item.education || (item.academicPath ? [item.academicPath] : []),
+        pastCompanies: item.pastCompanies || [],
         relevanceScore: item.relevanceScore || 50,
         connectionPoints: item.connectionPoints || ["Importé via LinkedIn"],
         academicPath: item.academicPath || "",
@@ -347,7 +377,7 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
     showToast(`Import terminé : ${addedCount} créés, ${updatedCount} mis à jour !`, "success");
   };
 
-  // Filtered list for preview
+  // Filtered list for preview supporting multidimensional category checks
   const filteredCandidates = candidates.filter(c => {
     // Text search
     const q = searchFilter.toLowerCase();
@@ -355,10 +385,19 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
       c.fullName.toLowerCase().includes(q) || 
       c.company.toLowerCase().includes(q) || 
       (c.position && c.position.toLowerCase().includes(q)) ||
-      (c.normalizedJobTitle && c.normalizedJobTitle.toLowerCase().includes(q));
+      (c.normalizedJobTitle && c.normalizedJobTitle.toLowerCase().includes(q)) ||
+      (c.categories && c.categories.some(cat => cat.subcategory.toLowerCase().includes(q)));
 
-    // Category filter
-    const matchesCategory = categoryFilter === "all" || c.category === categoryFilter;
+    // Multidimensional category matching
+    const matchesCategory = categoryFilter === "all" || 
+      c.category === categoryFilter || 
+      (c.categories && c.categories.some(cat => {
+        if (categoryFilter === "alumni") return cat.category === "academic" || cat.subcategory.toLowerCase().includes("alumni");
+        if (categoryFilter === "recruiter") return cat.category === "recruitment";
+        if (categoryFilter === "sector_pro") return cat.category === "sector" || cat.category === "professional_function";
+        if (categoryFilter === "student") return cat.category === "status" && /étudiant|alternant|stagiaire/i.test(cat.subcategory);
+        return false;
+      }));
 
     // Duplicate filter
     const matchesDuplicate = duplicateFilter === null || c.isDuplicate === duplicateFilter;
@@ -811,6 +850,34 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
                                 </span>
                               </div>
                             </div>
+
+                            {/* Multidimensional Categories Badges */}
+                            {candidate.categories && candidate.categories.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                {candidate.categories.map((cat, cIdx) => {
+                                  const style = getCategoryBadgeStyle(cat.category, cat.subcategory);
+                                  return (
+                                    <span 
+                                      key={cIdx} 
+                                      title={`${cat.reason || style.label} (Confiance : ${cat.confidence === 'high' ? 'Haute' : cat.confidence === 'medium' ? 'Moyenne' : 'Basse'})`}
+                                      className={`text-[10px] px-2 py-0.5 rounded-md border font-semibold flex items-center gap-1 cursor-default ${style.bgColor} ${style.textColor} ${style.borderColor}`}
+                                    >
+                                      <span>{style.label}</span>
+                                      {cat.confidence === "high" && (
+                                        <span className="w-1 h-1 rounded-full bg-current opacity-70" />
+                                      )}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Summary if available */}
+                            {candidate.summary && (
+                              <p className="text-[11px] text-[#9AA0B2] line-clamp-1 italic pt-0.5">
+                                "{candidate.summary}"
+                              </p>
+                            )}
 
                             {/* Connection Points Badges */}
                             {candidate.connectionPoints && candidate.connectionPoints.length > 0 && (

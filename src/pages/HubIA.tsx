@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useLanguage } from "../context/LanguageContext";
 import { dbStore } from "../dbStore";
 import { CandidateProfile, ChatSession, Opportunity, Contact, DocumentFile, CalendarEvent } from "../types";
 import { GlassCard, GlassButton } from "../components/Shared";
@@ -46,6 +47,7 @@ export interface ActiveFocusItem {
 }
 
 export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
+  const { language, t } = useLanguage();
   const [profile, setProfile] = useState<CandidateProfile>(dbStore.getProfile());
   const [opportunities, setOpportunities] = useState<Opportunity[]>(dbStore.getOpportunities());
   const [contacts, setContacts] = useState<Contact[]>(dbStore.getContacts());
@@ -70,48 +72,60 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
   const specialists = [
     {
       id: "general",
-      name: "Conseiller Carrière",
-      role: "Orientation & Stratégie",
-      desc: "Structure ta recherche et affine ta stratégie professionnelle",
+      name: language === "en" ? "Career Advisor" : "Conseiller Carrière",
+      role: language === "en" ? "Orientation & Strategy" : "Orientation & Stratégie",
+      desc: language === "en" ? "Structure your search and refine your career roadmap" : "Structure ta recherche et affine ta stratégie professionnelle",
       icon: Compass,
-      placeholder: "Ex: Comment analyser l'adéquation entre mon profil et mes offres ?"
+      placeholder: language === "en" ? "E.g. How to evaluate alignment between my profile and target roles?" : "Ex: Comment analyser l'adéquation entre mon profil et mes offres ?"
     },
     {
       id: "interview",
-      name: "Coach Entretien",
-      role: "Simulation & Méthode STAR",
-      desc: "Simule des entretiens et analyse tes réponses",
+      name: language === "en" ? "Interview Coach" : "Coach Entretien",
+      role: language === "en" ? "Mock Interview & STAR Method" : "Simulation & Méthode STAR",
+      desc: language === "en" ? "Practice interviews and analyze your responses" : "Simule des entretiens et analyse tes réponses",
       icon: UserCheck,
-      placeholder: "Ex: Entraîne-moi pour un entretien de 15 min en Banque Privée..."
+      placeholder: language === "en" ? "E.g. Train me for a 15-minute Private Banking interview..." : "Ex: Entraîne-moi pour un entretien de 15 min en Banque Privée..."
     },
     {
       id: "cv_letter",
-      name: "Expert CV & Lettres",
-      role: "ATS & Verbes d'Action",
-      desc: "Optimise tes candidatures et tes documents",
+      name: language === "en" ? "Resume & Cover Letter Expert" : "Expert CV & Lettres",
+      role: language === "en" ? "ATS & Action Verbs" : "ATS & Verbes d'Action",
+      desc: language === "en" ? "Optimize your job applications and documents" : "Optimise tes candidatures et tes documents",
       icon: FileText,
-      placeholder: "Ex: Rédige une accroche sur-mesure pour ma candidature chez LCL..."
+      placeholder: language === "en" ? "E.g. Write a tailored opening hook for my application at LCL..." : "Ex: Rédige une accroche sur-mesure pour ma candidature chez LCL..."
     },
     {
       id: "networking",
-      name: "Stratège Réseau",
-      role: "LinkedIn & Alumni",
-      desc: "Identifie les bonnes personnes et prépare tes prises de contact",
+      name: language === "en" ? "Networking Strategist" : "Stratège Réseau",
+      role: language === "en" ? "LinkedIn & Alumni Outreach" : "LinkedIn & Alumni",
+      desc: language === "en" ? "Identify the right connections and craft outreach messages" : "Identifie les bonnes personnes et prépare tes prises de contact",
       icon: Users,
-      placeholder: "Ex: Rédige un message LinkedIn pour contacter un Alumni UCA chez Crédit Agricole..."
+      placeholder: language === "en" ? "E.g. Draft a LinkedIn message to contact a UCA alumnus at Crédit Agricole..." : "Ex: Rédige un message LinkedIn pour contacter un Alumni UCA chez Crédit Agricole..."
     },
     {
       id: "negotiation",
-      name: "Négociation Salaire",
-      role: "Grilles & Argumentaire",
-      desc: "Prépare tes arguments et tes marges de négociation",
+      name: language === "en" ? "Salary Negotiation" : "Négociation Salaire",
+      role: language === "en" ? "Pay Scales & Pitch" : "Grilles & Argumentaire",
+      desc: language === "en" ? "Prepare your numbers, leverage and talking points" : "Prépare tes arguments et tes marges de négociation",
       icon: TrendingUp,
-      placeholder: "Ex: Comment négocier la gratification et les primes de mon contrat d'alternance ?"
+      placeholder: language === "en" ? "E.g. How to negotiate compensation and bonuses for my work-study contract?" : "Ex: Comment négocier la gratification et les primes de mon contrat d'alternance ?"
     }
   ];
 
   // Selected specialist metadata
   const currentSpecialist = specialists.find(s => s.id === activePersonaId) || specialists[0];
+
+  // Check pending initial prompt from home challenge card
+  useEffect(() => {
+    const pending = localStorage.getItem("nacora_initial_ai_prompt");
+    if (pending && activeSessionId) {
+      localStorage.removeItem("nacora_initial_ai_prompt");
+      const timer = setTimeout(() => {
+        handleSendMessage(pending);
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+  }, [activeSessionId]);
 
   // Data reload subscription
   useEffect(() => {
@@ -149,11 +163,13 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
         id: topOpp.id,
         type: "opportunity",
         title: `${topOpp.title} — ${topOpp.companyName}`,
-        subtitle: `${topOpp.contractType || "Alternance"} • ${topOpp.location || "France"} • ${topOpp.salary || "Barème conventionnel"}`,
-        detail: `Statut: ${topOpp.status}. Missions principales: ${(topOpp.extractedInfo?.missions || []).slice(0, 2).join(", ") || "Support gestion"}`
+        subtitle: `${topOpp.contractType || (language === "en" ? "Apprenticeship" : "Alternance")} • ${topOpp.location || "France"} • ${topOpp.salary || (language === "en" ? "Conventional scale" : "Barème conventionnel")}`,
+        detail: language === "en" 
+          ? `Status: ${topOpp.status}. Main missions: ${(topOpp.extractedInfo?.missions || []).slice(0, 2).join(", ") || "Management support"}`
+          : `Statut: ${topOpp.status}. Missions principales: ${(topOpp.extractedInfo?.missions || []).slice(0, 2).join(", ") || "Support gestion"}`
       });
     }
-  }, [opportunities]);
+  }, [opportunities, language]);
 
   // Auto scroll to bottom
   useEffect(() => {
@@ -179,34 +195,49 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
   // Create a new session for a specialist
   const handleCreateSession = (personaId: string = activePersonaId) => {
     const spec = specialists.find(s => s.id === personaId) || currentSpecialist;
-    const title = `${spec.name} — ${new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`;
+    const dateStr = new Date().toLocaleDateString(language === "en" ? "en-US" : "fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    const title = `${spec.name} — ${dateStr}`;
     const newSess = dbStore.addChatSession(personaId, title);
 
-    const userName = profile.fullName ? profile.fullName.split(" ")[0] : "Candidat";
+    const userName = profile.fullName ? profile.fullName.split(" ")[0] : (language === "en" ? "Candidate" : "Candidat");
     let initialGreeting = "";
 
-    if (personaId === "general") {
-      initialGreeting = `Bonjour ${userName}. Je suis ton **Conseiller Carrière NACORA**.\n\nEnsemble, nous allons structurer tes candidatures, analyser l'adéquation de ton profil avec tes offres cibles (${profile.currentAlternance || "Finance / Banque"}) et bâtir une stratégie d'accélération sur-mesure. Par quel sujet souhaites-tu commencer ?\n\n[ACTIONS: "Analyser mes opportunités" | "Évaluer mon profil candidat" | "Définir mon plan d'action"]`;
-    } else if (personaId === "interview") {
-      initialGreeting = `Prêt pour l'entraînement, ${userName} ? Je suis ton **Coach Entretien**.\n\nNous allons simuler des questions comportementales et techniques en utilisant la méthode **STAR** (Situation, Tâche, Action, Résultat). Indique-moi l'offre ou l'entreprise ciblée, et je te poserai la première question de mise en situation.\n\n[ACTIONS: "Lancer une simulation STAR" | "Questions pièges RH" | "Présentation de 2 minutes"]`;
-    } else if (personaId === "cv_letter") {
-      initialGreeting = `Bonjour ${userName}. En tant qu'**Expert CV & Lettres**, je t'aide à optimiser la lisibilité ATS de ton CV, enrichir tes verbes d'action et rédiger des accroches percutantes pour tes candidatures.\n\nTransmets-moi ton texte ou demande-moi d'adapter ta lettre pour une offre précise.\n\n[ACTIONS: "Optimiser les verbes d'action" | "Rédiger une lettre sur-mesure" | "Analyse des mots-clés ATS"]`;
-    } else if (personaId === "networking") {
-      initialGreeting = `Ravi de t'accompagner ${userName}. Je suis ton **Stratège Réseau**.\n\nNous allons identifier les Alumni et recruteurs stratégiques dans tes entreprises cibles, puis rédiger des messages d'approche LinkedIn personnalisés et à fort taux de réponse.\n\n[ACTIONS: "Message d'approche Alumni" | "Identifier les recruteurs clés" | "Message de relance bienveillant"]`;
-    } else if (personaId === "negotiation") {
-      initialGreeting = `Bonjour ${userName}. Je suis l'**Expert Négociation Salariale** de NACORA.\n\nNous allons évaluer ton package global (fixe, primes, gratification conventionnelle, avantages) et préparer les meilleurs arguments chiffrés pour aborder la rémunération sereinement.\n\n[ACTIONS: "Évaluer mon offre actuelle" | "Arguments de rémunération" | "Simuler l'échange de négociation"]`;
+    if (language === "en") {
+      if (personaId === "general") {
+        initialGreeting = `Hello ${userName}. I am your **NACORA Career Advisor**.\n\nTogether, we will structure your applications, evaluate the alignment between your profile and target roles (${profile.currentAlternance || "Finance / Banking"}), and build a tailored action plan. Which topic would you like to start with?\n\n[ACTIONS: "Analyze my opportunities" | "Assess my candidate profile" | "Define my roadmap"]`;
+      } else if (personaId === "interview") {
+        initialGreeting = `Ready to practice, ${userName}? I am your **Interview Coach**.\n\nWe will simulate behavioral and technical interview questions using the **STAR method** (Situation, Task, Action, Result). Let me know the target role or company, and I will ask you the first situation-based question.\n\n[ACTIONS: "Start a STAR simulation" | "Tricky HR questions" | "2-minute pitch"]`;
+      } else if (personaId === "cv_letter") {
+        initialGreeting = `Hello ${userName}. As your **Resume & Cover Letter Expert**, I help optimize the ATS readability of your CV, enrich your action verbs, and craft impactful hooks for your applications.\n\nShare your text or ask me to tailor a letter for a specific opening.\n\n[ACTIONS: "Enhance action verbs" | "Draft a tailored letter" | "ATS keywords check"]`;
+      } else if (personaId === "networking") {
+        initialGreeting = `Delighted to support you, ${userName}. I am your **Networking Strategist**.\n\nWe will pinpoint key alumni and recruiters at target companies and craft personalized LinkedIn outreach messages with high response rates.\n\n[ACTIONS: "Alumni outreach message" | "Identify key recruiters" | "Follow-up message"]`;
+      } else if (personaId === "negotiation") {
+        initialGreeting = `Hello ${userName}. I am your **Salary Negotiation Expert** at NACORA.\n\nWe will assess your overall compensation package (base salary, bonuses, perks) and prepare compelling arguments to negotiate with confidence.\n\n[ACTIONS: "Assess my current offer" | "Compensation arguments" | "Simulate negotiation dialogue"]`;
+      }
+    } else {
+      if (personaId === "general") {
+        initialGreeting = `Bonjour ${userName}. Je suis ton **Conseiller Carrière NACORA**.\n\nEnsemble, nous allons structurer tes candidatures, analyser l'adéquation de ton profil avec tes offres cibles (${profile.currentAlternance || "Finance / Banque"}) et bâtir une stratégie d'accélération sur-mesure. Par quel sujet souhaites-tu commencer ?\n\n[ACTIONS: "Analyser mes opportunités" | "Évaluer mon profil candidat" | "Définir mon plan d'action"]`;
+      } else if (personaId === "interview") {
+        initialGreeting = `Prêt pour l'entraînement, ${userName} ? Je suis ton **Coach Entretien**.\n\nNous allons simuler des questions comportementales et techniques en utilisant la méthode **STAR** (Situation, Tâche, Action, Résultat). Indique-moi l'offre ou l'entreprise ciblée, et je te poserai la première question de mise en situation.\n\n[ACTIONS: "Lancer une simulation STAR" | "Questions pièges RH" | "Présentation de 2 minutes"]`;
+      } else if (personaId === "cv_letter") {
+        initialGreeting = `Bonjour ${userName}. En tant qu'**Expert CV & Lettres**, je t'aide à optimiser la lisibilité ATS de ton CV, enrichir tes verbes d'action et rédiger des accroches percutantes pour tes candidatures.\n\nTransmets-moi ton texte ou demande-moi d'adapter ta lettre pour une offre précise.\n\n[ACTIONS: "Optimiser les verbes d'action" | "Rédiger une lettre sur-mesure" | "Analyse des mots-clés ATS"]`;
+      } else if (personaId === "networking") {
+        initialGreeting = `Ravi de t'accompagner ${userName}. Je suis ton **Stratège Réseau**.\n\nNous allons identifier les Alumni et recruteurs stratégiques dans tes entreprises cibles, puis rédiger des messages d'approche LinkedIn personnalisés et à fort taux de réponse.\n\n[ACTIONS: "Message d'approche Alumni" | "Identifier les recruteurs clés" | "Message de relance bienveillant"]`;
+      } else if (personaId === "negotiation") {
+        initialGreeting = `Bonjour ${userName}. Je suis l'**Expert Négociation Salariale** de NACORA.\n\nNous allons évaluer ton package global (fixe, primes, gratification conventionnelle, avantages) et préparer les meilleurs arguments chiffrés pour aborder la rémunération sereinement.\n\n[ACTIONS: "Évaluer mon offre actuelle" | "Arguments de rémunération" | "Simuler l'échange de négociation"]`;
+      }
     }
 
     dbStore.addMessageToSession(newSess.id, "model", initialGreeting);
     setActiveSessionId(newSess.id);
-    showToast(`Session initialisée : ${spec.name}`, "info");
+    showToast(language === "en" ? `Session started: ${spec.name}` : `Session initialisée : ${spec.name}`, "info");
   };
 
   // Delete session
   const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     dbStore.deleteChatSession(sessionId);
-    showToast("Session supprimée", "info");
+    showToast(language === "en" ? "Session deleted" : "Session supprimée", "info");
 
     const remaining = dbStore.getChatSessions();
     if (remaining.length > 0) {
@@ -249,9 +280,10 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
         date: e.date,
         type: e.type
       })),
-      documents: documents.slice(0, 5).map(d => ({
+      documents: documents.slice(0, 8).map(d => ({
         title: d.title,
-        type: d.type
+        type: d.type,
+        content: d.content || ""
       }))
     };
   };
@@ -328,31 +360,36 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
     setTimeout(() => setCopiedMsgId(null), 2000);
   };
 
-  // Format assistant response text nicely
+  // Format assistant response text nicely and clean markdown artifacts
   const renderFormattedText = (text: string) => {
     const textWithoutActions = text.replace(/\[ACTIONS:.*?\]/gs, "").trim();
 
-    return textWithoutActions.split("\n\n").map((paragraph, pIdx) => (
-      <p key={pIdx} className="mb-2.5 last:mb-0 leading-relaxed">
-        {paragraph.split("\n").map((line, lIdx) => {
-          if (line.trim().startsWith("* ") || line.trim().startsWith("- ")) {
-            const content = line.trim().substring(2);
+    return textWithoutActions.split("\n\n").map((paragraph, pIdx) => {
+      const cleanPara = paragraph.replace(/^#{1,6}\s+/gm, "");
+      return (
+        <div key={pIdx} className="mb-2.5 last:mb-0 leading-relaxed">
+          {cleanPara.split("\n").map((line, lIdx) => {
+            const trimmed = line.trim();
+            const cleanLine = trimmed.replace(/^#{1,6}\s+/, "");
+            if (cleanLine.startsWith("* ") || cleanLine.startsWith("- ")) {
+              const content = cleanLine.substring(2);
+              return (
+                <span key={lIdx} className="flex items-start gap-2 my-1 pl-1">
+                  <span className="text-[#FF6685] font-bold mt-0.5">•</span>
+                  <span>{formatBoldText(content)}</span>
+                </span>
+              );
+            }
             return (
-              <span key={lIdx} className="flex items-start gap-2 my-1 pl-1">
-                <span className="text-[#FF6685] font-bold mt-0.5">•</span>
-                <span>{formatBoldText(content)}</span>
-              </span>
+              <React.Fragment key={lIdx}>
+                {lIdx > 0 && <br />}
+                {formatBoldText(cleanLine)}
+              </React.Fragment>
             );
-          }
-          return (
-            <React.Fragment key={lIdx}>
-              {lIdx > 0 && <br />}
-              {formatBoldText(line)}
-            </React.Fragment>
-          );
-        })}
-      </p>
-    ));
+          })}
+        </div>
+      );
+    });
   };
 
   const formatBoldText = (text: string) => {
@@ -365,15 +402,33 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
     });
   };
 
-  // Extract action chips from assistant response
+  // Extract action chips from assistant response or generate intelligent contextual follow-ups
   const extractActionChips = (text: string): string[] => {
     const match = text.match(/\[ACTIONS:\s*([^\]]+)\]/);
-    if (!match) return [];
-    const raw = match[1];
-    return raw
-      .split("|")
-      .map(s => s.replace(/["']/g, "").trim())
-      .filter(Boolean);
+    if (match) {
+      const raw = match[1];
+      const parsed = raw
+        .split("|")
+        .map(s => s.replace(/["']/g, "").trim())
+        .filter(Boolean);
+      if (parsed.length > 0) return parsed;
+    }
+
+    // Contextual intelligent fallback based on active specialist and message keywords
+    const lower = text.toLowerCase();
+    if (activePersonaId === "interview" || lower.includes("entretien") || lower.includes("star") || lower.includes("question")) {
+      return ["Donne-moi un exemple de réponse STAR", "Quelles sont les questions pièges ?", "Simuler un autre cas pratique"];
+    }
+    if (activePersonaId === "cv_letter" || lower.includes("cv") || lower.includes("accroche") || lower.includes("lettre")) {
+      return ["Optimiser pour une autre offre", "Rédiger l'email d'accompagnement", "Vérifier les mots-clés ATS"];
+    }
+    if (activePersonaId === "networking" || lower.includes("réseau") || lower.includes("linkedin") || lower.includes("alumni")) {
+      return ["Personnaliser pour un autre profil", "Rédiger un message de relance", "Identifier un autre contact clé"];
+    }
+    if (activePersonaId === "negotiation" || lower.includes("salaire") || lower.includes("package") || lower.includes("négociation")) {
+      return ["Calculer le salaire net estimé", "Préparer l'argumentaire chiffré", "Simuler l'échange de négociation"];
+    }
+    return ["Détailler ce point", "Rédiger le message prêt à l'emploi", "Passer à l'étape suivante"];
   };
 
   // Calculations for Context used
@@ -395,7 +450,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
           className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-[#FF6685] hover:bg-white/10 transition-colors"
         >
           <Layers className="w-3.5 h-3.5" />
-          <span>Contexte actif ({opportunities.length} opp.)</span>
+          <span>{language === "en" ? `Active context (${opportunities.length} opp.)` : `Contexte actif (${opportunities.length} opp.)`}</span>
         </button>
       </div>
 
@@ -411,10 +466,10 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
             <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
               <h2 className="text-xs font-bold uppercase tracking-wider text-[#9AA0B2] flex items-center gap-2">
                 <Sparkles className="w-3.5 h-3.5 text-[#C084FC]" />
-                Spécialistes IA
+                {t.hubIa.specialistsTitle}
               </h2>
               <span className="text-[10px] text-[#FF6685] font-semibold bg-[rgba(216,26,69,0.12)] px-2 py-0.5 rounded-full border border-[rgba(216,26,69,0.25)]">
-                5 experts
+                {t.hubIa.expertsCount}
               </span>
             </div>
 
@@ -465,10 +520,10 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
               >
                 <div className="flex items-center gap-2">
                   <History className="w-4 h-4 text-[#FF6685]" />
-                  <span>Historique des discussions ({sessions.length})</span>
+                  <span>{t.hubIa.historyTitle} ({sessions.length})</span>
                 </div>
                 <div className="flex items-center gap-1 text-[11px] text-[#FF6685] font-semibold bg-[rgba(216,26,69,0.1)] group-hover:bg-[rgba(216,26,69,0.2)] px-2.5 py-1 rounded-xl border border-[rgba(216,26,69,0.25)] transition-all">
-                  <span>Afficher</span>
+                  <span>{t.hubIa.show}</span>
                   <ChevronDown className="w-3.5 h-3.5" />
                 </div>
               </button>
@@ -481,23 +536,23 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                   className="text-xs font-bold uppercase tracking-wider text-[#9AA0B2] hover:text-[#F5F6FA] flex items-center gap-2 cursor-pointer"
                 >
                   <History className="w-3.5 h-3.5 text-[#FF6685]" />
-                  <span>Historique ({sessions.length})</span>
+                  <span>{t.hubIa.historyTitle} ({sessions.length})</span>
                   <ChevronUp className="w-3.5 h-3.5 text-[#FF6685]" />
                 </button>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleCreateSession(activePersonaId)}
                     className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[#FF6685] transition-colors flex items-center gap-1 text-[11px] font-semibold cursor-pointer"
-                    title="Nouvelle conversation"
+                    title={t.hubIa.newChat}
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Nouveau</span>
+                    <span>{t.hubIa.newChat}</span>
                   </button>
                   <button
                     onClick={() => setShowHistory(false)}
                     className="text-[11px] text-[#9AA0B2] hover:text-[#F5F6FA] transition-colors cursor-pointer px-1.5 py-0.5 rounded-md hover:bg-white/5"
                   >
-                    Masquer
+                    {t.hubIa.hide}
                   </button>
                 </div>
               </div>
@@ -505,9 +560,9 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
               <div className="flex-1 overflow-y-auto space-y-1.5 max-h-[240px] pr-1">
                 {sessions.length === 0 ? (
                   <div className="h-20 flex flex-col items-center justify-center border border-dashed border-white/10 rounded-2xl text-[11px] text-[#9AA0B2] gap-1 p-2 text-center">
-                    <span>Aucun échange archivé</span>
+                    <span>{t.hubIa.noHistory}</span>
                     <button onClick={() => handleCreateSession()} className="text-[#FF6685] hover:underline font-semibold cursor-pointer">
-                      Démarrer une session
+                      {t.hubIa.startSession}
                     </button>
                   </div>
                 ) : (
@@ -539,7 +594,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                         <button
                           onClick={(e) => handleDeleteSession(sess.id, e)}
                           className="p-1 rounded-lg hover:bg-white/10 text-[#9AA0B2] hover:text-[#F04438] transition-colors cursor-pointer shrink-0"
-                          title="Supprimer la session"
+                          title={language === "en" ? "Delete session" : "Supprimer la session"}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -568,7 +623,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                   <span>{currentSpecialist.name}</span>
                 </h2>
                 <p className="text-[11px] text-[#9AA0B2]">
-                  Ton assistant carrière NACORA
+                  {language === "en" ? "Your NACORA career assistant" : "Ton assistant carrière NACORA"}
                 </p>
               </div>
             </div>
@@ -581,19 +636,19 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                     ? "bg-[rgba(216,26,69,0.14)] border-[rgba(216,26,69,0.35)] text-[#FF6685]"
                     : "bg-white/5 border-white/10 text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10"
                 }`}
-                title="Afficher ou masquer l'historique"
+                title={language === "en" ? "Toggle history" : "Afficher ou masquer l'historique"}
               >
                 <History className="w-3.5 h-3.5 text-[#FF6685]" />
-                <span className="hidden sm:inline">{showHistory ? "Masquer l'historique" : `Historique (${sessions.length})`}</span>
+                <span className="hidden sm:inline">{showHistory ? t.hubIa.hide : `${t.hubIa.historyTitle} (${sessions.length})`}</span>
               </button>
 
               <button
                 onClick={() => handleCreateSession(activePersonaId)}
                 className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-[#F5F6FA] hover:text-[#FF6685] transition-colors text-xs font-medium flex items-center gap-1.5 cursor-pointer"
-                title="Démarrer une nouvelle conversation"
+                title={t.hubIa.newChat}
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Nouveau chat</span>
+                <span className="hidden sm:inline">{t.hubIa.newChat}</span>
               </button>
             </div>
           </div>
@@ -603,14 +658,14 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
             <div className="px-4 py-2 bg-[rgba(216,26,69,0.06)] border-b border-[rgba(216,26,69,0.15)] flex items-center justify-between text-[11px]">
               <div className="flex items-center gap-2 text-[#FF6685] font-medium truncate">
                 <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                <span className="text-[#9AA0B2]">Sujet actif :</span>
+                <span className="text-[#9AA0B2]">{t.hubIa.activeTopic}</span>
                 <span className="font-semibold text-[#F5F6FA] truncate">{activeFocus.title}</span>
               </div>
               <button
                 onClick={() => setActiveFocus(null)}
                 className="text-[10px] text-[#9AA0B2] hover:text-[#F04438] transition-colors underline cursor-pointer shrink-0 ml-2"
               >
-                Désactiver
+                {t.hubIa.disable}
               </button>
             </div>
           )}
@@ -624,61 +679,61 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                 </div>
                 <div className="max-w-md space-y-1.5">
                   <h3 className="text-sm font-bold text-[#F5F6FA]">
-                    {currentSpecialist.name} est à ton écoute
+                    {currentSpecialist.name} {t.hubIa.listening}
                   </h3>
                   <p className="text-xs text-[#9AA0B2]">
-                    {currentSpecialist.desc}. Pose ta question ou choisis l'une des suggestions ci-dessous.
+                    {currentSpecialist.desc}. {t.hubIa.selectSuggestion}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap justify-center gap-2 max-w-lg pt-2">
                   {currentSpecialist.id === "general" && (
                     <>
-                      <button onClick={() => handleSendMessage("Analyser mes opportunités bancaires en cours")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        🎯 Analyser mes opportunités
+                      <button onClick={() => handleSendMessage(language === "en" ? "Analyze my current opportunities" : "Analyser mes opportunités bancaires en cours")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        🎯 {language === "en" ? "Analyze my opportunities" : "Analyser mes opportunités"}
                       </button>
-                      <button onClick={() => handleSendMessage("Quels sont mes points forts pour les Masters Finance ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        🎓 Préparer mes candidatures Master
+                      <button onClick={() => handleSendMessage(language === "en" ? "What are my strengths for master's programs?" : "Quels sont mes points forts pour les Masters Finance ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        🎓 {language === "en" ? "Prepare Master applications" : "Préparer mes candidatures Master"}
                       </button>
                     </>
                   )}
                   {currentSpecialist.id === "interview" && (
                     <>
-                      <button onClick={() => handleSendMessage("Simule un entretien de 15 min pour le poste en banque privée")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        🎙️ Lancer une simulation STAR
+                      <button onClick={() => handleSendMessage(language === "en" ? "Simulate a 15-minute interview for my target role" : "Simule un entretien de 15 min pour le poste en banque privée")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        🎙️ {language === "en" ? "Start a STAR simulation" : "Lancer une simulation STAR"}
                       </button>
-                      <button onClick={() => handleSendMessage("Quelles questions pièges puis-je avoir en entretien RH ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        ❓ Questions pièges courantes
+                      <button onClick={() => handleSendMessage(language === "en" ? "What tricky HR questions should I anticipate?" : "Quelles questions pièges puis-je avoir en entretien RH ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        ❓ {language === "en" ? "Common tricky questions" : "Questions pièges courantes"}
                       </button>
                     </>
                   )}
                   {currentSpecialist.id === "cv_letter" && (
                     <>
-                      <button onClick={() => handleSendMessage("Peux-tu analyser les mots-clés ATS de mon offre ciblée ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        📄 Analyse des mots-clés ATS
+                      <button onClick={() => handleSendMessage(language === "en" ? "Can you analyze ATS keywords for my target opening?" : "Peux-tu analyser les mots-clés ATS de mon offre ciblée ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        📄 {language === "en" ? "ATS keywords check" : "Analyse des mots-clés ATS"}
                       </button>
-                      <button onClick={() => handleSendMessage("Propose-moi une phrase d'accroche percutante pour ma lettre")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        ✍️ Accroche pour lettre de motivation
+                      <button onClick={() => handleSendMessage(language === "en" ? "Suggest a compelling opening hook for my letter" : "Propose-moi une phrase d'accroche percutante pour ma lettre")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        ✍️ {language === "en" ? "Cover letter hook" : "Accroche pour lettre de motivation"}
                       </button>
                     </>
                   )}
                   {currentSpecialist.id === "networking" && (
                     <>
-                      <button onClick={() => handleSendMessage("Rédige un message d'approche LinkedIn pour un Alumni UCA")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        ✉️ Message d'approche Alumni
+                      <button onClick={() => handleSendMessage(language === "en" ? "Draft a LinkedIn outreach message for an alumnus" : "Rédige un message d'approche LinkedIn pour un Alumni UCA")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        ✉️ {language === "en" ? "Alumni outreach message" : "Message d'approche Alumni"}
                       </button>
-                      <button onClick={() => handleSendMessage("Comment relancer un recruteur après une candidature ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        🔄 Stratégie de relance
+                      <button onClick={() => handleSendMessage(language === "en" ? "How to follow up with a recruiter effectively?" : "Comment relancer un recruteur après une candidature ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        🔄 {language === "en" ? "Follow-up strategy" : "Stratégie de relance"}
                       </button>
                     </>
                   )}
                   {currentSpecialist.id === "negotiation" && (
                     <>
-                      <button onClick={() => handleSendMessage("Comment aborder la négociation de gratification pour mon alternance ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        💼 Évaluer mon package
+                      <button onClick={() => handleSendMessage(language === "en" ? "How to approach compensation negotiation?" : "Comment aborder la négociation de gratification pour mon alternance ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        💼 {language === "en" ? "Assess my package" : "Évaluer mon package"}
                       </button>
-                      <button onClick={() => handleSendMessage("Quels arguments de valeur chiffrés puis-je présenter ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
-                        📊 Arguments de rémunération
+                      <button onClick={() => handleSendMessage(language === "en" ? "What quantified value arguments can I present?" : "Quels arguments de valeur chiffrés puis-je présenter ?")} className="glass-pill text-xs py-1.5 px-3 bg-white/5 border-white/10 hover:border-[#FF6685]/40 text-[#F5F6FA] hover:text-[#FF6685] cursor-pointer">
+                        📊 {language === "en" ? "Compensation arguments" : "Arguments de rémunération"}
                       </button>
                     </>
                   )}
@@ -713,7 +768,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                           <button
                             onClick={() => handleCopyText(msg.id, msg.text)}
                             className="absolute top-2.5 right-2.5 p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[#9AA0B2] hover:text-[#F5F6FA] transition-colors opacity-0 group-hover:opacity-100 cursor-pointer"
-                            title="Copier le texte"
+                            title={language === "en" ? "Copy text" : "Copier le texte"}
                           >
                             {copiedMsgId === msg.id ? <Check className="w-3.5 h-3.5 text-[#34D399]" /> : <Copy className="w-3.5 h-3.5" />}
                           </button>
@@ -722,7 +777,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                         {renderFormattedText(msg.text)}
 
                         <div className="text-[9px] text-[#9AA0B2] mt-2 text-right">
-                          {new Date(msg.timestamp).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+                          {new Date(msg.timestamp).toLocaleTimeString(language === "en" ? "en-US" : "fr-FR", { hour: "2-digit", minute: "2-digit" })}
                         </div>
                       </div>
 
@@ -753,7 +808,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                   <Bot className="w-4 h-4 animate-spin" />
                 </div>
                 <div className="bg-white/[0.04] border border-white/10 rounded-2xl rounded-tl-none p-4 text-xs text-[#9AA0B2] flex items-center gap-2">
-                  <span>{currentSpecialist.name} analyse les données NACORA</span>
+                  <span>{currentSpecialist.name} {t.hubIa.analyzing}</span>
                   <span className="flex gap-1">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#FF6685] animate-bounce" />
                     <span className="w-1.5 h-1.5 rounded-full bg-[#FF6685] animate-bounce delay-100" />
@@ -779,7 +834,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
               type="submit"
               disabled={isLoading || !inputMessage.trim()}
               className="p-3 rounded-xl bg-[#D81A45] hover:bg-[#FF6685] disabled:opacity-40 text-white transition-all shadow-[0_0_15px_rgba(216,26,69,0.3)] cursor-pointer flex items-center justify-center shrink-0"
-              title="Envoyer"
+              title={t.hubIa.send}
             >
               <Send className="w-4 h-4" />
             </button>
@@ -796,10 +851,10 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
             <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
               <h3 className="text-xs font-bold uppercase tracking-wider text-[#9AA0B2] flex items-center gap-2">
                 <Layers className="w-3.5 h-3.5 text-[#38BDF8]" />
-                Contexte utilisé
+                {t.hubIa.contextUsed}
               </h3>
               <span className="text-[10px] text-[#34D399] font-semibold bg-[rgba(52,211,153,0.1)] px-2 py-0.5 rounded-full border border-[rgba(52,211,153,0.2)]">
-                Temps réel
+                {t.hubIa.realTime}
               </span>
             </div>
 
@@ -808,37 +863,37 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
               <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.02] border border-white/5">
                 <span className="text-[#9AA0B2] flex items-center gap-2">
                   <User className="w-3.5 h-3.5 text-[#9AA0B2]" />
-                  Profil candidat
+                  {t.hubIa.candidateProfile}
                 </span>
                 <span className="font-semibold text-[#F5F6FA] text-[11px] truncate max-w-[130px]">
-                  {profile.fullName || "Complété"}
+                  {profile.fullName || (language === "en" ? "Completed" : "Complété")}
                 </span>
               </div>
 
               <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.02] border border-white/5">
                 <span className="text-[#9AA0B2] flex items-center gap-2">
                   <Briefcase className="w-3.5 h-3.5 text-[#FF6685]" />
-                  Opportunités
+                  {t.hubIa.opportunities}
                 </span>
                 <span className="font-semibold text-[#F5F6FA]">
-                  {opportunities.length} ({activeOppsCount} actives)
+                  {opportunities.length} ({activeOppsCount} {t.hubIa.active})
                 </span>
               </div>
 
               <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.02] border border-white/5">
                 <span className="text-[#9AA0B2] flex items-center gap-2">
                   <Users className="w-3.5 h-3.5 text-[#FBBF24]" />
-                  Contacts réseau
+                  {t.hubIa.networkContacts}
                 </span>
                 <span className="font-semibold text-[#F5F6FA]">
-                  {contacts.length} ({alumniCount} alumni)
+                  {contacts.length} ({alumniCount} {t.hubIa.alumni})
                 </span>
               </div>
 
               <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.02] border border-white/5">
                 <span className="text-[#9AA0B2] flex items-center gap-2">
                   <Calendar className="w-3.5 h-3.5 text-[#C084FC]" />
-                  Échéances agenda
+                  {t.hubIa.calendarDeadlines}
                 </span>
                 <span className="font-semibold text-[#F5F6FA]">
                   {calendarEvents.length}
@@ -848,7 +903,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
               <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.02] border border-white/5">
                 <span className="text-[#9AA0B2] flex items-center gap-2">
                   <Building2 className="w-3.5 h-3.5 text-[#38BDF8]" />
-                  Entreprises suivies
+                  {t.hubIa.trackedCompanies}
                 </span>
                 <span className="font-semibold text-[#F5F6FA]">
                   {dbStore.getCompanies().length}
@@ -858,7 +913,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
               <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.02] border border-white/5">
                 <span className="text-[#9AA0B2] flex items-center gap-2">
                   <FileText className="w-3.5 h-3.5 text-[#34D399]" />
-                  Documents
+                  {t.hubIa.documents}
                 </span>
                 <span className="font-semibold text-[#F5F6FA]">
                   {documents.length}
@@ -869,12 +924,12 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
             {/* Active Subject Selector */}
             <div className="pt-2 border-t border-white/10 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#F5F6FA]">Sujet d'étude actif</span>
+                <span className="text-xs font-bold text-[#F5F6FA]">{t.hubIa.activeStudySubject}</span>
                 <button
                   onClick={() => setShowFocusPicker(!showFocusPicker)}
                   className="text-[11px] text-[#FF6685] hover:underline font-semibold cursor-pointer flex items-center gap-0.5"
                 >
-                  <span>{activeFocus ? "Changer" : "Sélectionner"}</span>
+                  <span>{activeFocus ? t.hubIa.change : t.hubIa.select}</span>
                   <ChevronDown className="w-3 h-3" />
                 </button>
               </div>
@@ -883,7 +938,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
               {activeFocus ? (
                 <div className="p-3 rounded-2xl bg-[rgba(216,26,69,0.1)] border border-[rgba(216,26,69,0.3)] space-y-1.5 relative">
                   <div className="flex items-center justify-between text-[10px] text-[#FF6685] font-bold uppercase tracking-wider">
-                    <span>{activeFocus.type === "opportunity" ? "Offre ciblée" : activeFocus.type === "contact" ? "Contact réseau" : "Document"}</span>
+                    <span>{activeFocus.type === "opportunity" ? (language === "en" ? "Target role" : "Offre ciblée") : activeFocus.type === "contact" ? (language === "en" ? "Network contact" : "Contact réseau") : "Document"}</span>
                     <button onClick={() => setActiveFocus(null)} className="text-[#9AA0B2] hover:text-[#F04438] cursor-pointer">
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -894,14 +949,14 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                 </div>
               ) : (
                 <div className="p-3 rounded-2xl border border-dashed border-white/10 text-[11px] text-[#9AA0B2] text-center">
-                  Aucun sujet spécifique sélectionné. L'assistant utilise le contexte global de tes candidatures.
+                  {t.hubIa.noSubjectSelected}
                 </div>
               )}
 
               {/* Focus Picker Dropdown List */}
               {showFocusPicker && (
                 <div className="p-2 rounded-2xl bg-[#0B0F19] border border-white/15 space-y-2 shadow-2xl max-h-[220px] overflow-y-auto mt-2">
-                  <div className="text-[10px] font-bold text-[#9AA0B2] uppercase px-2 pt-1">Opportunités en cours</div>
+                  <div className="text-[10px] font-bold text-[#9AA0B2] uppercase px-2 pt-1">{t.hubIa.ongoingOpportunities}</div>
                   {opportunities.map(opp => (
                     <button
                       key={opp.id}
@@ -910,8 +965,10 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                           id: opp.id,
                           type: "opportunity",
                           title: `${opp.title} — ${opp.companyName}`,
-                          subtitle: `${opp.contractType || "Alternance"} • ${opp.location || "France"} • ${opp.salary || "Barème"}`,
-                          detail: `Statut: ${opp.status}. Missions: ${(opp.extractedInfo?.missions || []).slice(0, 2).join(", ") || "Aide gestion"}`
+                          subtitle: `${opp.contractType || (language === "en" ? "Apprenticeship" : "Alternance")} • ${opp.location || "France"} • ${opp.salary || (language === "en" ? "Conventional scale" : "Barème")}`,
+                          detail: language === "en"
+                            ? `Status: ${opp.status}. Missions: ${(opp.extractedInfo?.missions || []).slice(0, 2).join(", ") || "Management support"}`
+                            : `Statut: ${opp.status}. Missions: ${(opp.extractedInfo?.missions || []).slice(0, 2).join(", ") || "Aide gestion"}`
                         });
                         setShowFocusPicker(false);
                       }}
@@ -921,7 +978,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                     </button>
                   ))}
 
-                  <div className="text-[10px] font-bold text-[#9AA0B2] uppercase px-2 pt-1 border-t border-white/10">Contacts récents</div>
+                  <div className="text-[10px] font-bold text-[#9AA0B2] uppercase px-2 pt-1 border-t border-white/10">{t.hubIa.recentContacts}</div>
                   {contacts.slice(0, 5).map(c => (
                     <button
                       key={c.id}
@@ -930,8 +987,8 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
                           id: c.id,
                           type: "contact",
                           title: `${c.fullName} — ${c.companyName}`,
-                          subtitle: `${c.jobTitle} • Categorie: ${c.category}`,
-                          detail: `Points de connexion: ${(c.connectionPoints || []).join(" | ")}`
+                          subtitle: `${c.jobTitle} • ${language === "en" ? "Category" : "Categorie"}: ${c.category}`,
+                          detail: `${language === "en" ? "Connection points" : "Points de connexion"}: ${(c.connectionPoints || []).join(" | ")}`
                         });
                         setShowFocusPicker(false);
                       }}

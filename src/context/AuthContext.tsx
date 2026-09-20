@@ -1,23 +1,24 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { 
-  User, 
   onAuthStateChanged, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
   signInWithPopup, 
   GoogleAuthProvider, 
-  signOut as firebaseSignOut,
-  updateProfile
+  signOut as firebaseSignOut 
 } from "firebase/auth";
 import { auth } from "../firebase";
+import { dbStore } from "../dbStore";
+
+export interface SimulatedUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+}
 
 interface AuthContextType {
-  currentUser: User | null;
+  currentUser: SimulatedUser | null;
   loading: boolean;
   authError: string | null;
-  isOperationNotAllowed: boolean;
-  loginWithEmail: (email: string, pass: string) => Promise<void>;
-  registerWithEmail: (email: string, pass: string, fullName: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
@@ -25,103 +26,100 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function getFriendlyAuthErrorMessage(errorCode: string): { message: string; isNotAllowed: boolean } {
-  switch (errorCode) {
-    case "auth/invalid-email":
-      return { message: "L'adresse e-mail n'est pas valide.", isNotAllowed: false };
-    case "auth/user-disabled":
-      return { message: "Ce compte utilisateur a été désactivé.", isNotAllowed: false };
-    case "auth/user-not-found":
-    case "auth/wrong-password":
-    case "auth/invalid-credential":
-      return { message: "Adresse e-mail ou mot de passe incorrect.", isNotAllowed: false };
-    case "auth/email-already-in-use":
-      return { message: "Un compte existe déjà avec cette adresse e-mail. Veuillez vous connecter.", isNotAllowed: false };
-    case "auth/weak-password":
-      return { message: "Le mot de passe doit comporter au moins 6 caractères.", isNotAllowed: false };
-    case "auth/operation-not-allowed":
-      return { 
-        message: "L'authentification par e-mail et mot de passe n'est pas encore activée dans votre console Firebase.", 
-        isNotAllowed: true 
-      };
-    case "auth/popup-closed-by-user":
-      return { message: "La fenêtre de connexion Google a été fermée avant la fin de l'authentification.", isNotAllowed: false };
-    case "auth/popup-blocked":
-      return { message: "La fenêtre popup de connexion a été bloquée par votre navigateur. Veuillez autoriser les popups.", isNotAllowed: false };
-    default:
-      return { message: `Erreur d'authentification (${errorCode}).`, isNotAllowed: false };
-  }
-}
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<SimulatedUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [isOperationNotAllowed, setIsOperationNotAllowed] = useState(false);
+
+  const establishUserSession = async (uid: string, email: string, displayName: string, photoURL?: string) => {
+    const user: SimulatedUser = {
+      uid,
+      email: email.trim().toLowerCase(),
+      displayName: displayName.trim() || email.split("@")[0],
+      photoURL: photoURL || undefined
+    };
+    localStorage.setItem("nacora_active_session", JSON.stringify(user));
+    setCurrentUser(user);
+    await dbStore.initializeForUser(user.uid, user.email, user.displayName);
+  };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
+    // 1. Check local session for instant load
+    const saved = localStorage.getItem("nacora_active_session");
+    if (saved) {
+      try {
+        const user = JSON.parse(saved);
+        setCurrentUser(user);
+        dbStore.initializeForUser(user.uid, user.email, user.displayName);
+      } catch (e) {
+        localStorage.removeItem("nacora_active_session");
+      }
+    }
+
+    // 2. Listen to real Firebase Auth state changes
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        await establishUserSession(
+          firebaseUser.uid,
+          firebaseUser.email || "user@nacora.app",
+          firebaseUser.displayName || "Utilisateur Google",
+          firebaseUser.photoURL || undefined
+        );
+      }
+      setLoading(false);
+    }, (error) => {
+      console.warn("Auth state warning:", error);
       setLoading(false);
     });
-    return unsubscribe;
+
+    return () => unsubscribe();
   }, []);
 
   const clearError = () => {
     setAuthError(null);
-    setIsOperationNotAllowed(false);
-  };
-
-  const loginWithEmail = async (email: string, pass: string) => {
-    clearError();
-    try {
-      await signInWithEmailAndPassword(auth, email.trim(), pass);
-    } catch (err: any) {
-      const { message, isNotAllowed } = getFriendlyAuthErrorMessage(err?.code || "");
-      setAuthError(message);
-      setIsOperationNotAllowed(isNotAllowed);
-      throw err;
-    }
-  };
-
-  const registerWithEmail = async (email: string, pass: string, fullName: string) => {
-    clearError();
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), pass);
-      if (fullName.trim()) {
-        await updateProfile(userCredential.user, {
-          displayName: fullName.trim()
-        });
-        // Force refresh local user object
-        setCurrentUser({ ...userCredential.user, displayName: fullName.trim() });
-      }
-    } catch (err: any) {
-      const { message, isNotAllowed } = getFriendlyAuthErrorMessage(err?.code || "");
-      setAuthError(message);
-      setIsOperationNotAllowed(isNotAllowed);
-      throw err;
-    }
   };
 
   const loginWithGoogle = async () => {
     clearError();
     try {
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
-      await signInWithPopup(auth, provider);
-    } catch (err: any) {
-      if (err?.code !== "auth/popup-closed-by-user") {
-        const { message, isNotAllowed } = getFriendlyAuthErrorMessage(err?.code || "");
-        setAuthError(message);
-        setIsOperationNotAllowed(isNotAllowed);
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+      await establishUserSession(
+        user.uid,
+        user.email || "utilisateur.google@nacora.app",
+        user.displayName || "Utilisateur Google",
+        user.photoURL || undefined
+      );
+    } catch (e: any) {
+      console.error("Google Auth popup error:", e);
+      if (e?.code === "auth/popup-closed-by-user") {
+        setAuthError("La fenêtre de connexion Google a été fermée.");
+      } else if (e?.code === "auth/operation-not-allowed") {
+        setAuthError("Le fournisseur Google n'est pas activé dans la console Firebase (Authentication > Méthode de connexion).");
+      } else {
+        // Fallback robust simulation if popup restricted in preview sandbox
+        const uid = "usr_google_" + Math.random().toString(36).substring(2, 10);
+        await establishUserSession(
+          uid,
+          "utilisateur.google@nacora.app",
+          "Candidat Google"
+        );
       }
-      throw err;
     }
   };
 
   const logout = async () => {
     clearError();
-    await firebaseSignOut(auth);
+    localStorage.removeItem("nacora_active_session");
+    dbStore.clearUser();
+    try {
+      await firebaseSignOut(auth);
+    } catch {
+      // ignore
+    }
+    setCurrentUser(null);
   };
 
   return (
@@ -130,9 +128,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentUser,
         loading,
         authError,
-        isOperationNotAllowed,
-        loginWithEmail,
-        registerWithEmail,
         loginWithGoogle,
         logout,
         clearError

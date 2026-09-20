@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { dbStore } from "./dbStore";
 import { CandidateProfile, ToastState } from "./types";
 import { useAuth } from "./context/AuthContext";
+import { useLanguage } from "./context/LanguageContext";
 import { AuthScreen } from "./components/AuthScreen";
 import { Home } from "./pages/Home";
 import { Opportunities } from "./pages/Opportunities";
@@ -11,6 +12,11 @@ import { Calendar } from "./pages/Calendar";
 import { Documents } from "./pages/Documents";
 import { HubIA } from "./pages/HubIA";
 import { Profile } from "./pages/Profile";
+import { Settings } from "./pages/Settings";
+import { PrivacyPolicy } from "./pages/PrivacyPolicy";
+import { TermsOfService } from "./pages/TermsOfService";
+import { NotFound } from "./pages/NotFound";
+import { CookieBanner } from "./components/CookieBanner";
 import { Toast, Badge } from "./components/Shared";
 import { 
   Home as HomeIcon, 
@@ -29,16 +35,19 @@ import {
   GraduationCap,
   ChevronRight,
   LogOut,
-  Loader2
+  Loader2,
+  Settings as SettingsIcon
 } from "lucide-react";
 
 export default function App() {
   const { currentUser, loading, logout } = useAuth();
 
-  const [currentView, setCurrentView] = useState<string>("opportunities");
+  const [currentView, setCurrentView] = useState<string>("accueil");
   const [activePersona, setActivePersona] = useState<string>("general");
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile>(dbStore.getProfile());
+  const { language, t } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSidebarHovered, setIsSidebarHovered] = useState(false);
   const [toast, setToast] = useState<ToastState>({ isOpen: false, message: "", type: "info" });
@@ -88,9 +97,9 @@ export default function App() {
     try {
       await logout();
       dbStore.clearUser();
-      showToast("Déconnexion réussie.", "info");
+      showToast(t.nav.logoutConfirm, "info");
     } catch (e) {
-      showToast("Erreur lors de la déconnexion.", "error");
+      showToast(language === "en" ? "Error during sign out." : "Erreur lors de la déconnexion.", "error");
     }
   };
 
@@ -103,15 +112,39 @@ export default function App() {
         </div>
         <div className="flex items-center gap-3 text-sm text-slate-300 font-medium">
           <Loader2 className="w-4 h-4 animate-spin text-[#E55B5B]" />
-          <span>Chargement de votre espace sécurisé NACORA...</span>
+          <span>{language === "en" ? "Loading your secure NACORA workspace..." : "Chargement de votre espace sécurisé NACORA..."}</span>
         </div>
       </div>
     );
   }
 
-  // 2. Unauthenticated state: show Auth screen
+  // 2. Unauthenticated state: show Auth screen or legal pages
   if (!currentUser) {
-    return <AuthScreen />;
+    if (currentView === "politique-confidentialite") {
+      return (
+        <>
+          <PrivacyPolicy onBack={() => setCurrentView("accueil")} />
+          <CookieBanner />
+        </>
+      );
+    }
+    if (currentView === "cgu") {
+      return (
+        <>
+          <TermsOfService onBack={() => setCurrentView("accueil")} />
+          <CookieBanner />
+        </>
+      );
+    }
+    return (
+      <>
+        <AuthScreen 
+          onOpenPrivacy={() => setCurrentView("politique-confidentialite")}
+          onOpenTerms={() => setCurrentView("cgu")}
+        />
+        <CookieBanner />
+      </>
+    );
   }
 
   // User display metadata
@@ -126,34 +159,36 @@ export default function App() {
 
   // Sidebar navigation items definitions
   const primaryNav = [
-    { id: "accueil", label: "Accueil", icon: <HomeIcon className="w-4 h-4" /> },
-    { id: "opportunities", label: "Opportunités", icon: <Briefcase className="w-4 h-4" /> },
-    { id: "calendrier", label: "Calendrier", icon: <CalendarIcon className="w-4 h-4" /> },
-    { id: "documents", label: "Documents", icon: <FileText className="w-4 h-4" /> },
-    { id: "contacts", label: "Contacts", icon: <Users className="w-4 h-4" /> },
-    { id: "entreprises", label: "Entreprises", icon: <Building2 className="w-4 h-4" /> }
+    { id: "accueil", label: t.nav.home, icon: <HomeIcon className="w-4 h-4" /> },
+    { id: "opportunities", label: t.nav.opportunities, icon: <Briefcase className="w-4 h-4" /> },
+    { id: "calendrier", label: t.nav.calendar, icon: <CalendarIcon className="w-4 h-4" /> },
+    { id: "documents", label: t.nav.documents, icon: <FileText className="w-4 h-4" /> },
+    { id: "contacts", label: t.nav.contacts, icon: <Users className="w-4 h-4" /> },
+    { id: "entreprises", label: t.nav.companies, icon: <Building2 className="w-4 h-4" /> },
+    { id: "settings", label: t.nav.settings, icon: <SettingsIcon className="w-4 h-4" /> }
   ];
 
   const aiNav = [
-    { id: "general", label: "Hub IA Carrière", icon: <Sparkles className="w-4 h-4 text-purple-400" /> },
-    { id: "interview", label: "Interview Coach", icon: <GraduationCap className="w-4 h-4 text-[#c084fc]" /> },
-    { id: "networking", label: "LinkedIn & Réseau", icon: <Compass className="w-4 h-4 text-[#fbbf24]" /> },
-    { id: "cv_letter", label: "Expert CV & Lettre", icon: <FileText className="w-4 h-4 text-[#34d399]" /> },
-    { id: "negotiation", label: "Négociation Salaire", icon: <MessageSquare className="w-4 h-4 text-[#f87171]" /> }
+    { id: "general", label: t.nav.careerAiHub, icon: <Sparkles className="w-4 h-4 text-purple-400" /> },
+    { id: "interview", label: t.nav.interviewCoach, icon: <GraduationCap className="w-4 h-4 text-[#c084fc]" /> },
+    { id: "networking", label: t.nav.linkedinNetwork, icon: <Compass className="w-4 h-4 text-[#fbbf24]" /> },
+    { id: "cv_letter", label: t.nav.cvLetterExpert, icon: <FileText className="w-4 h-4 text-[#34d399]" /> },
+    { id: "negotiation", label: t.nav.salaryNegotiation, icon: <MessageSquare className="w-4 h-4 text-[#f87171]" /> }
   ];
 
   // Active view helper for top bar title & icon
   const activeViewInfo = (() => {
     switch (currentView) {
-      case "accueil": return { label: "Accueil", icon: <HomeIcon className="w-4 h-4 text-[#FF6685]" /> };
-      case "opportunities": return { label: "Opportunités", icon: <Briefcase className="w-4 h-4 text-[#38BDF8]" /> };
-      case "calendrier": return { label: "Calendrier", icon: <CalendarIcon className="w-4 h-4 text-[#FBBF24]" /> };
-      case "documents": return { label: "Documents & CV", icon: <FileText className="w-4 h-4 text-[#34D399]" /> };
-      case "contacts": return { label: "Contacts & Réseau", icon: <Users className="w-4 h-4 text-[#C084FC]" /> };
-      case "entreprises": return { label: "Entreprises Cibles", icon: <Building2 className="w-4 h-4 text-[#F87171]" /> };
-      case "hub_ia": return { label: "Hub IA Carrière", icon: <Sparkles className="w-4 h-4 text-[#C084FC]" /> };
-      case "profile": return { label: "Profil Candidat", icon: <User className="w-4 h-4 text-[#FF6685]" /> };
-      default: return { label: "Tableau de bord", icon: <Compass className="w-4 h-4 text-[#38BDF8]" /> };
+      case "accueil": return { label: t.nav.home, icon: <HomeIcon className="w-4 h-4 text-[#FF6685]" /> };
+      case "opportunities": return { label: t.nav.opportunities, icon: <Briefcase className="w-4 h-4 text-[#38BDF8]" /> };
+      case "calendrier": return { label: t.nav.calendar, icon: <CalendarIcon className="w-4 h-4 text-[#FBBF24]" /> };
+      case "documents": return { label: `${t.nav.documents} & CV`, icon: <FileText className="w-4 h-4 text-[#34D399]" /> };
+      case "contacts": return { label: `${t.nav.contacts} & ${language === "en" ? "Network" : "Réseau"}`, icon: <Users className="w-4 h-4 text-[#C084FC]" /> };
+      case "entreprises": return { label: t.nav.companies, icon: <Building2 className="w-4 h-4 text-[#F87171]" /> };
+      case "hub_ia": return { label: t.nav.careerAiHub, icon: <Sparkles className="w-4 h-4 text-[#C084FC]" /> };
+      case "profile": return { label: t.nav.candidateProfile, icon: <User className="w-4 h-4 text-[#FF6685]" /> };
+      case "settings": return { label: t.nav.settings, icon: <SettingsIcon className="w-4 h-4 text-[#38BDF8]" /> };
+      default: return { label: t.nav.dashboard, icon: <Compass className="w-4 h-4 text-[#38BDF8]" /> };
     }
   })();
 
@@ -231,7 +266,7 @@ export default function App() {
             <span className={`text-[10px] text-[#9AA0B2]/70 uppercase tracking-wider font-bold select-none px-2 block transition-all duration-300 whitespace-nowrap overflow-hidden ${
               isExpanded ? 'opacity-100 max-h-6 mb-1.5' : 'opacity-0 max-h-0 mb-0 pointer-events-none'
             }`}>
-              Recherche & Suivi
+              {t.nav.searchAndTracking}
             </span>
             <div className="space-y-1">
               {primaryNav.map(item => {
@@ -267,7 +302,7 @@ export default function App() {
               isExpanded ? 'opacity-100 max-h-6 mb-1.5' : 'opacity-0 max-h-0 mb-0 pointer-events-none'
             }`}>
               <Sparkles className="w-3.5 h-3.5 text-[#C084FC] shrink-0" />
-              <span>Accélérateurs IA</span>
+              <span>{t.nav.aiAccelerators}</span>
             </span>
             <div className="space-y-1">
               {aiNav.map(item => {
@@ -307,7 +342,7 @@ export default function App() {
             className={`flex items-center rounded-xl hover:bg-white/5 transition-colors text-left cursor-pointer overflow-hidden ${
               isExpanded ? 'flex-1 gap-2.5 p-1.5 min-w-0' : 'p-1 justify-center'
             }`}
-            title="Mon profil candidat"
+            title={t.nav.candidateProfile}
           >
             <div className="w-8 h-8 rounded-full bg-[rgba(216,26,69,0.18)] text-[#FF6685] border border-[rgba(216,26,69,0.35)] flex items-center justify-center font-bold text-xs shrink-0 shadow-[0_0_12px_rgba(216,26,69,0.2)]">
               {userInitials}
@@ -323,13 +358,28 @@ export default function App() {
           {isExpanded && (
             <button
               onClick={handleLogout}
-              title="Se déconnecter"
+              title={t.nav.logout}
               className="p-2 rounded-xl text-[#9AA0B2] hover:text-[#F04438] hover:bg-[rgba(240,68,56,0.12)] transition-colors cursor-pointer shrink-0"
             >
               <LogOut className="w-4 h-4" />
             </button>
           )}
         </div>
+
+        {/* Legal links when sidebar is expanded */}
+        {isExpanded && (
+          <div className="pt-2 px-1 flex items-center justify-between text-[10px] text-[#9AA0B2] border-t border-white/5 mt-2">
+            <button onClick={() => handleNavigate("politique-confidentialite")} className="hover:text-white transition-colors underline">
+              {t.nav.privacy}
+            </button>
+            <span>•</span>
+            <button onClick={() => handleNavigate("cgu")} className="hover:text-white transition-colors underline">
+              {t.nav.terms}
+            </button>
+            <span>•</span>
+            <span>v1.0</span>
+          </div>
+        )}
       </aside>
 
       {/* 4. Main Workspace (Scrollable Right Side, dynamically reclaiming space) */}
@@ -355,7 +405,7 @@ export default function App() {
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Rechercher une offre, un contact, un document..."
+                placeholder={t.nav.searchPlaceholder}
                 className="w-full glass-input pl-9 pr-12 py-1.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60 focus:border-[#D81A45]/50 transition-all"
               />
               <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-mono font-semibold text-[#9AA0B2]/70 px-1.5 py-0.5 bg-white/5 border border-white/10 rounded-md pointer-events-none select-none">
@@ -370,14 +420,14 @@ export default function App() {
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.03] border border-white/10 text-[#9AA0B2]">
               <span className="w-2 h-2 rounded-full bg-[#38BDF8] animate-pulse" />
               <span className="text-[11px] font-semibold text-[#F5F6FA]">
-                {profile.currentAlternance ? `Alternance : ${profile.currentAlternance}` : "Espace Candidat"}
+                {profile.currentAlternance ? `${language === "en" ? "Contract" : "Alternance"} : ${profile.currentAlternance}` : t.nav.candidateSpace}
               </span>
             </div>
 
             {/* AI Status Pill */}
             <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-full bg-[rgba(192,132,252,0.1)] border border-[rgba(192,132,252,0.25)] text-[#C084FC]">
               <Sparkles className="w-3 h-3 text-[#C084FC]" />
-              <span className="text-[11px] font-semibold">NACORA AI Active</span>
+              <span className="text-[11px] font-semibold">{t.nav.aiActive}</span>
             </div>
 
             <div className="h-4 w-px bg-white/10 mx-0.5" />
@@ -387,7 +437,7 @@ export default function App() {
               <button 
                 onClick={() => handleNavigate("profile")}
                 className="flex items-center gap-2.5 cursor-pointer p-1.5 rounded-xl hover:bg-white/5 border border-transparent hover:border-white/10 transition-all group"
-                title="Mon profil candidat"
+                title={t.nav.candidateProfile}
               >
                 <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#D81A45]/30 to-[#FF1A55]/20 text-[#FF6685] border border-[#D81A45]/40 flex items-center justify-center font-bold text-xs shadow-[0_0_12px_rgba(216,26,69,0.25)] group-hover:scale-105 transition-transform">
                   {userInitials}
@@ -399,7 +449,7 @@ export default function App() {
 
               <button
                 onClick={handleLogout}
-                title="Se déconnecter"
+                title={t.nav.logout}
                 className="p-2 rounded-xl text-[#9AA0B2] hover:text-[#F04438] hover:bg-[rgba(240,68,56,0.12)] border border-transparent hover:border-[rgba(240,68,56,0.2)] transition-all cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
@@ -423,10 +473,22 @@ export default function App() {
             <Documents />
           )}
           {currentView === "contacts" && (
-            <Contacts showToast={showToast} searchTerm={searchTerm} />
+            <Contacts 
+              showToast={showToast} 
+              searchTerm={searchTerm} 
+              initialSelectedContactId={selectedContactId}
+              onClearInitialContact={() => setSelectedContactId(null)}
+            />
           )}
           {currentView === "entreprises" && (
-            <Companies searchTerm={searchTerm} showToast={showToast} />
+            <Companies 
+              searchTerm={searchTerm} 
+              showToast={showToast} 
+              onSelectContact={(contactId) => {
+                setSelectedContactId(contactId);
+                handleNavigate("contacts");
+              }}
+            />
           )}
           {currentView === "hub_ia" && (
             <HubIA showToast={showToast} initialPersona={activePersona} />
@@ -434,10 +496,35 @@ export default function App() {
           {currentView === "profile" && (
             <Profile />
           )}
+          {currentView === "settings" && (
+            <Settings showToast={showToast} onNavigate={handleNavigate} />
+          )}
+          {currentView === "politique-confidentialite" && (
+            <PrivacyPolicy onBack={() => handleNavigate("accueil")} />
+          )}
+          {currentView === "cgu" && (
+            <TermsOfService onBack={() => handleNavigate("accueil")} />
+          )}
+          {![
+            "accueil", 
+            "opportunities", 
+            "calendrier", 
+            "documents", 
+            "contacts", 
+            "entreprises", 
+            "hub_ia", 
+            "profile", 
+            "settings",
+            "politique-confidentialite", 
+            "cgu"
+          ].includes(currentView) && (
+            <NotFound onGoHome={() => handleNavigate("accueil")} />
+          )}
         </div>
       </main>
 
-      {/* 5. Central toast alert portal */}
+      {/* 5. Cookie banner & Central toast alert portal */}
+      <CookieBanner />
       <Toast
         isOpen={toast.isOpen}
         message={toast.message}

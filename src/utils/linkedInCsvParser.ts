@@ -1,4 +1,4 @@
-import { Contact } from "../types";
+import { Contact, ContactCategory, ContactCategoryItem, NetworkingRelevanceItem, ProfessionalProfileDetails } from "../types";
 
 export interface ParsedLinkedInRawRow {
   id: string;
@@ -15,7 +15,7 @@ export interface ParsedLinkedInRawRow {
 
 export interface LinkedInContactCandidate extends ParsedLinkedInRawRow {
   normalizedJobTitle?: string;
-  category?: 'recruiter' | 'alumni' | 'student' | 'sector_pro' | 'other_pro' | 'other';
+  category?: ContactCategory;
   relevanceScore?: number;
   connectionPoints?: string[];
   academicPath?: string;
@@ -26,6 +26,15 @@ export interface LinkedInContactCandidate extends ParsedLinkedInRawRow {
   existingContact?: Contact;
   duplicateAction: 'update' | 'skip' | 'create_new';
   selected: boolean;
+
+  // Multidimensional classification
+  categories?: ContactCategoryItem[];
+  professionalProfile?: ProfessionalProfileDetails;
+  networkingRelevance?: NetworkingRelevanceItem[];
+  summary?: string;
+  education?: string[];
+  pastCompanies?: string[];
+  companySector?: string;
 }
 
 /**
