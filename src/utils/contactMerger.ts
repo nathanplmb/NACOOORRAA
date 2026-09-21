@@ -1,28 +1,29 @@
 import { Contact, ContactCategory, ContactCategoryItem, NetworkingRelevanceItem, ProfessionalProfileDetails } from "../types";
 
 /**
- * Strict verification of whether a job title belongs to Human Resources / Recruitment.
- * Excludes operational advisors (conseillère bancaire, conseiller clientèle, banquier, etc.) who are NOT HR.
+ * Strict and exhaustive verification of whether a job title belongs to Human Resources / Recruitment / Talent.
+ * Detects all French and English variations (Ressources Humaines, RH, DRH, RRH, HRBP, Talent Acquisition, Recrutement, etc.).
  */
 export function isHumanResourcesRole(jobTitle?: string): boolean {
   if (!jobTitle) return false;
   const t = jobTitle.toLowerCase();
 
-  // Exclusions: if it's an operational advisor, banker, sales, or engineer with no explicit HR function
-  const isOperationalRole = /(conseill[eè]re?|charg[eé]e? de client[eè]le|charg[eé]e? d'affaires|banqu|patrimoine|wealth|cr[eé]dit|credit|analyste|directeur d'agence|directrice d'agence|courtier|trader|d[eé]veloppeur|ing[eé]nieur)/i.test(t);
-  
-  const hasExplicitHR = /(talent acquisition|charg[eé]e? de recrutement|responsable recrutement|directeur.*recrutement|directrice.*recrutement|consultant.*recrutement|cabinet.*recrutement|headhunter|chasseur de t[eê]tes|campus recruiter|campus manager|drh\b|directeur.*rh\b|directrice.*rh\b|responsable rh\b|charg[eé]e? rh\b|gestionnaire rh\b|assistant.*rh\b|human resources|people & culture|people lead|people partner|talent partner|talent manager|recruiter|recruitment)/i.test(t);
+  // Comprehensive regular expression capturing all semantic HR & Recruitment roles and variants
+  const hasExplicitHR = /(ressources?[\s-]humaines?|human[\s-]resources|\brh\b|\bdrh\b|\brrh\b|\barh\b|\bgrh\b|\bsirh\b|\bhrbp\b|\bhr\b|recrut|recruit|talent[\s-]acquisition|talent[\s-]attraction|talent[\s-]management|talent[\s-]partner|talent[\s-]lead|talent[\s-]manager|talent[\s-]specialist|talent[\s-]advisor|headhunter|chasseur[\s-]de[\s-]t[eê]tes|campus[\s-]recruiter|campus[\s-]manager|relations?[\s-][eé]coles|relations?[\s-]entreprises?|charg[eé]e?[\s-]de[\s-]recherche|people[\s-](&|and)[\s-]culture|people[\s-]lead|people[\s-]partner|people[\s-]ops|people[\s-]operations|chief[\s-]people|gestion[\s-]des[\s-]carri[eè]res|d[eé]veloppement[\s-]rh|relations?[\s-]sociales?|administration[\s-]du[\s-]personnel|paie[\s-](et|&)[\s-]rh|consultant[\s-]rh|conseill(er|ère)[\s-]en[\s-]recrutement)/i.test(t);
 
-  if (isOperationalRole && !hasExplicitHR) {
-    return false;
-  }
   return hasExplicitHR;
 }
 
 /**
  * Strict verification of whether a contact belongs to the Banking, Finance, and Wealth sector.
+ * NOTE: If the contact is HR within a financial institution, HR priority takes precedence over banking advisor.
  */
 export function isBankingAndFinanceRole(jobTitle?: string, companyName?: string): boolean {
+  // If explicitly in HR, they are not an operational banking advisor
+  if (jobTitle && isHumanResourcesRole(jobTitle)) {
+    return false;
+  }
+
   const combined = `${jobTitle || ""} ${companyName || ""}`.toLowerCase();
   
   const hasFinanceKeywords = /(conseill[eè]re?.*(banqu|client|financ|patrimoine|agence)|banqu|financ|patrimoine|wealth|cr[eé]dit|credit|assurance|gestion priv[eé]e|cgp|cgpc|analyste.*financ|charg[eé]e? d'affaires|charg[eé]e? de client[eè]le|directeur.*agence|directrice.*agence|courtier|actuaire|tr[eé]sor|m&a|private equity|invest|asset management|portfolio)/i.test(combined);
@@ -48,15 +49,15 @@ export function computePrimaryCategory(
   );
   if (hasAlumni || fallback === "alumni") return "alumni";
 
-  // Check for strict recruiter / HR (must NOT be an operational banking advisor)
+  // Check for strict recruiter / HR (including HR within a bank or enterprise)
   if (jobTitle && isHumanResourcesRole(jobTitle)) return "recruiter";
 
   const hasRecruiter = categories?.some(
     c => c.category === "recruitment" && 
-         /talent acquisition|charg[eé]e? de recrutement|responsable recrutement|recrut|drh|responsable rh|charg[eé]e? rh|human resources|headhunter|campus manager/i.test(c.subcategory) &&
-         !/conseill[eè]re?|client[eè]le|banqu|financ/i.test(c.subcategory)
+         /talent|recrut|recruit|ressources?[\s-]humaines?|\brh\b|\bdrh\b|\brrh\b|\bhrbp\b|\bhr\b|human resources|headhunter|campus manager/i.test(c.subcategory) &&
+         !/conseill[eè]re?[\s-]client|client[eè]le|gestionnaire[\s-]patrimoine/i.test(c.subcategory)
   );
-  if (hasRecruiter && !isBankingAndFinanceRole(jobTitle, companyName)) return "recruiter";
+  if (hasRecruiter) return "recruiter";
 
   // Check for target sector professional (Banking, Finance, Wealth, FinTech)
   if (jobTitle && isBankingAndFinanceRole(jobTitle, companyName)) return "sector_pro";

@@ -13,6 +13,7 @@ import {
   setDoc, 
   getDoc 
 } from "firebase/firestore";
+import { isHumanResourcesRole, isBankingAndFinanceRole } from "./utils/contactMerger";
 
 export const calculateProfileCompletion = (p: CandidateProfile): { score: number; completedSections: number; totalSections: number; sectionsStatus: Record<string, boolean> } => {
   const sectionsStatus = {
@@ -224,6 +225,7 @@ class DBStore {
         if (data.contacts && data.contacts.length > 0) {
           this.contacts = data.contacts;
         }
+        this.reconcileContactCategories();
         if (data.companies && data.companies.length > 0) {
           this.companies = data.companies;
         }
@@ -365,6 +367,9 @@ class DBStore {
       } else {
         this.contacts = [];
       }
+
+      // Reconcile categories
+      this.reconcileContactCategories();
 
       if (co) {
         try { this.companies = JSON.parse(co); } catch { this.companies = []; }
@@ -530,6 +535,59 @@ class DBStore {
     this.contacts = this.contacts.map(c => c.id === contact.id ? contact : c);
     this.recalculateCompanyCounters();
     this.notify();
+  }
+
+  /**
+   * Reconciles all existing contacts with deep semantic HR & Recruiter rules.
+   * Retroactively fixes misclassified contacts without losing any custom notes, relevance scores, or metadata.
+   */
+  reconcileContactCategories(): { updatedCount: number; affectedContacts: string[] } {
+    let updatedCount = 0;
+    const affectedContacts: string[] = [];
+
+    this.contacts = this.contacts.map(c => {
+      const isAlumni = c.category === "alumni" || Boolean(c.academicPath) || (c.connectionPoints || []).some(p => /alumni|iut|uca|clermont/i.test(p)) || (c.categories || []).some(cat => cat.category === "academic");
+      const isHR = isHumanResourcesRole(c.jobTitle) || isHumanResourcesRole(c.normalizedJobTitle);
+      const isBank = isBankingAndFinanceRole(c.jobTitle, c.companyName) || isBankingAndFinanceRole(c.normalizedJobTitle, c.companyName);
+
+      let newCategory = c.category;
+
+      if (isAlumni) {
+        newCategory = "alumni";
+      } else if (isHR) {
+        newCategory = "recruiter";
+      } else if (c.category === "recruiter" && isBank && !isHR) {
+        newCategory = "sector_pro";
+      }
+
+      if (newCategory !== c.category) {
+        updatedCount++;
+        const name = c.fullName || `${c.firstName || ""} ${c.lastName || ""}`.trim() || "Contact";
+        affectedContacts.push(`${name} (${c.jobTitle || "Poste non renseigné"} @ ${c.companyName || "Entreprise"}) : ${c.category} ➔ ${newCategory}`);
+
+        let updatedConnectionPoints = [...(c.connectionPoints || [])];
+        if (newCategory === "recruiter") {
+          const hrPoint = c.companyName ? `Recrutement RH chez ${c.companyName}` : "Recrutement & Ressources Humaines";
+          if (!updatedConnectionPoints.some(p => /recrut|rh|ressources humaines/i.test(p))) {
+            updatedConnectionPoints.unshift(hrPoint);
+          }
+        }
+
+        return {
+          ...c,
+          category: newCategory,
+          connectionPoints: updatedConnectionPoints
+        };
+      }
+      return c;
+    });
+
+    if (updatedCount > 0) {
+      this.recalculateCompanyCounters();
+      this.notify();
+    }
+
+    return { updatedCount, affectedContacts };
   }
 
   deleteContact(id: string) {
@@ -715,6 +773,7 @@ class DBStore {
       }
       if (Array.isArray(data.contacts)) {
         this.contacts = data.contacts;
+        this.reconcileContactCategories();
       }
       if (Array.isArray(data.companies)) {
         this.companies = data.companies;

@@ -10,7 +10,7 @@ import {
   Contact, 
   CalendarEvent 
 } from "../types.ts";
-import { computePrimaryCategory } from "../utils/contactMerger.ts";
+import { computePrimaryCategory, isHumanResourcesRole } from "../utils/contactMerger.ts";
 import { CV_FRAMEWORK_SYSTEM_PROMPT } from "./cvFramework.ts";
 import { 
   NETWORKING_FRAMEWORK_SYSTEM_PROMPT,
@@ -24,7 +24,8 @@ let aiClient: GoogleGenAI | null = null;
 export const CASCADE_MODELS = [
   "gemini-3.1-flash-lite",
   "gemini-3.8-flash",
-  "gemini-flash-latest"
+  "gemini-flash-latest",
+  "gemini-3.1-pro-preview"
 ];
 
 function getAi(): GoogleGenAI {
@@ -243,32 +244,31 @@ export function analyzeWithHeuristics(
     }
 
     // --- 2. RECRUTEMENT / RH ---
-    // Strict distinction: Operational bankers, client advisors, wealth managers are NEVER recruiters
-    const isOperationalBanking = /(conseill[eè]re?|charg[eé]e? de client[eè]le|charg[eé]e? d'affaires|banqu|patrimoine|wealth|cr[eé]dit|credit|analyste|directeur d'agence|directrice d'agence|courtier|trader)/i.test(job);
-    const hasExplicitHRRole = /(talent acquisition|charg[eé]e? de recrutement|responsable recrutement|directeur.*recrutement|consultant.*recrutement|cabinet.*recrutement|headhunter|chasseur de t[eê]tes|campus recruiter|campus manager|drh\b|directeur.*rh\b|directrice.*rh\b|responsable rh\b|charg[eé]e? rh\b|gestionnaire rh\b|assistant.*rh\b|human resources|people & culture|people lead|people partner|talent partner|talent manager|recruiter|recruitment)/i.test(job);
-
-    const isRecruiter = hasExplicitHRRole && !isOperationalBanking;
+    // Detect all variants: Ressources Humaines, RH, DRH, RRH, HRBP, Talent Acquisition, Recrutement, etc.
+    const isRecruiter = isHumanResourcesRole(job);
 
     if (isRecruiter) {
-      let sub = "Recruteur / Talent Acquisition";
-      if (/responsable|directeur|head|lead|drh/i.test(job)) sub = "Responsable Recrutement / RH";
-      else if (/campus/i.test(job)) sub = "Campus Recruiter";
+      let sub = "Recruteur / RH";
+      if (/responsable|directeur|directrice|head|lead|drh|rrh|partner|cpo|manager/i.test(job)) sub = "Responsable Ressources Humaines / Recrutement";
+      else if (/campus|relations?[\s-][eé]coles/i.test(job)) sub = "Campus Recruiter";
+      else if (/talent/i.test(job)) sub = "Talent Acquisition & Recrutement";
+      else if (/assistant|charg[eé]e?|gestionnaire|coordinat/i.test(job)) sub = "Chargé(e) / Gestionnaire RH";
 
       categories.push({
         category: "recruitment",
         subcategory: sub,
         confidence: "high",
-        reason: `Rôle explicite en ressources humaines et recrutement : "${rawJob}"`
+        reason: `Fonction explicite en Ressources Humaines / Recrutement : "${rawJob}"`
       });
       networkingRelevance.push({
         type: "Recrutement",
         pillar: "Recrutement RH",
-        context: comp ? `Opportunités de carrière chez ${rawComp}` : "Opportunités de stage, alternance ou premier emploi",
-        recommendation: "Point de contact prioritaire pour faire part de votre candidature et solliciter un créneau d'échange.",
+        context: comp ? `Gestion des talents & recrutement chez ${rawComp}` : "Opportunités de recrutement, stage et alternance",
+        recommendation: "Point de contact prioritaire pour présenter votre candidature ciblée et solliciter un échange.",
         confidence: "high",
-        reason: "Contact RH clé pour des opportunités de recrutement"
+        reason: "Interlocuteur RH / Recruteur clé pour accélérer vos opportunités"
       });
-      connectionPoints.push(comp ? `Recrutement RH chez ${rawComp}` : "Recruteur RH");
+      connectionPoints.push(comp ? `Recrutement RH chez ${rawComp}` : "Ressources Humaines & Recrutement");
     }
 
     // --- 3. FONCTION PROFESSIONNELLE ---
@@ -564,9 +564,10 @@ export async function analyzeLinkedInContacts(
     LES 8 DIMENSIONS D'ANALYSE INDÉPENDANTES :
     1. STATUT / PARCOURS : "Étudiant", "Alternant", "Stagiaire", "Jeune diplômé", "Diplômé", "Doctorant", "Chercheur", "Enseignant", "Professeur", "Responsable pédagogique", "Alumni".
        Attention : Ne confonds JAMAIS un enseignant ou cadre d'école avec un étudiant !
-    2. RECRUTEMENT / RH : "Recruteur", "Talent Acquisition", "Campus Recruiter", "Recruitment Manager", "HR", "HR Manager", "HR Business Partner", "Talent Manager", "Employer Branding", "Direction RH".
-       Attention ABSOLUE : Un conseiller bancaire, chargé de clientèle, banquier privé ou conseiller en agence N'EST PAS un recruteur ni un RH ! Ne classe JAMAIS un conseiller financier/bancaire dans "recruitment". Classe-le dans "Finance & Banque" (Fonction) et "Banque & Services financiers" (Secteur).
-       Ne classe PAS non plus une personne en marketing ou ingénierie comme recruteur simplement parce qu'elle mentionne "Talent Program".
+    2. RECRUTEMENT / RH : Catégorise obligatoirement dans "recruitment" (et catégorie principale "recruiter") toute personne exerçant une fonction en Ressources Humaines, Gestion des Talents ou Recrutement :
+       - Intitulés cibles : "Ressources Humaines", "RH", "DRH", "RRH", "ARH", "HRBP", "HR Business Partner", "HR Manager", "Responsable Ressources Humaines", "Chargé(e) de Ressources Humaines / RH", "Assistant(e) RH", "Gestionnaire RH", "Développement RH", "Relations Sociales", "Talent Acquisition", "Talent Manager", "Campus Recruiter", "Campus Manager", "Chargé(e) de Recrutement", "Consultant(e) en Recrutement", "Chasseur de têtes", "Headhunter", "Chargé de relations écoles", "Relations Entreprises / Écoles".
+       - Règle bancaire clé : Si une personne travaille dans les RH ou le Recrutement au sein d'une banque ou entreprise financière (ex: "Responsable Ressources Humaines - Banque Populaire" ou "Chargé de recrutement - Crédit Agricole"), sa catégorie RH prioritaire est "recruitment" (avec secteur "Banque & Services financiers").
+       - Exclusion stricte : Un conseiller bancaire, chargé de clientèle particuliers/professionnels, banquier privé, gestionnaire de patrimoine ou directeur d'agence commerciale N'EST PAS un recruteur/RH ! Classe-le dans "Finance & Banque" (Fonction) et "Banque & Services financiers" (Secteur).
     3. FONCTION PROFESSIONNELLE : "Finance & Banque", "Gestion de Patrimoine", "Assurance", "FinTech", "Audit & Comptabilité", "Commercial & Sales", "Marketing & Communication", "Tech, Data & Produit", "Conseil & Stratégie", "Direction & Management", "Juridique", "Opérations".
     4. NIVEAU / SENIORITÉ : "Junior", "Confirmé", "Senior", "Manager", "Director", "Executive", "C-Level / Fondateur", "Partner".
     5. SECTEUR D'ACTIVITÉ : "Banque & Services financiers", "Gestion de Patrimoine", "FinTech & Néo-finance", "Assurance", "Conseil", "Tech & SaaS", "Enseignement Supérieur", etc. Indique si le secteur correspond aux secteurs ciblés par le candidat ("isTargetSector": true|false).
@@ -712,11 +713,18 @@ export async function analyzeLinkedInContacts(
     } catch (modelErr: any) {
       const errMsg = modelErr?.message || String(modelErr);
       const isQuota = errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota exceeded");
+      const isDemandSpike = errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("high demand");
+      
       if (isQuota) {
-        console.log(`[analyzeLinkedInContacts] Quota API atteint, bascule immédiate sur le moteur heuristique.`);
+        console.info(`[analyzeLinkedInContacts] Quota API atteint, bascule immédiate sur le moteur heuristique NACORA.`);
         return analyzeWithHeuristics(rawContacts, candidateProfile);
       }
-      console.warn(`[analyzeLinkedInContacts] Modèle ${modelName} indisponible, passage au suivant:`, errMsg);
+      
+      if (isDemandSpike) {
+        console.info(`[analyzeLinkedInContacts] Modèle ${modelName} temporairement saturé (503), passage au modèle suivant du cascade.`);
+      } else {
+        console.warn(`[analyzeLinkedInContacts] Modèle ${modelName} indisponible, passage au suivant:`, errMsg);
+      }
     }
   }
 
@@ -1756,7 +1764,8 @@ export async function parseContactsFromText(
       - N'invente JAMAIS aucune information. Si une donnée n'est pas présente, laisse le champ vide ou null.
       - **Consignes globales / Liens communs** : Si le texte contient une instruction indiquant un lien internet ou un portail commun pour tous les contacts (ex: "relier tous les contacts suivants via ce lien [URL]" ou mentionnant un lien global au début ou dans le texte), tu DOIS reporter cette même URL dans le champ 'contactUrl' de **tous** les contacts extraits.
       - Pour la catégorie ("category"), choisis strictement parmi : "recruiter", "alumni", "student", "sector_pro", "other_pro", "other".
-      - Ne classe JAMAIS quelqu'un comme "recruiter" ou "RH" à moins qu'il n'exerce explicitement un métier de recrutement/RH.
+      - "recruiter" : Attribue obligatoirement à toute personne travaillant dans les Ressources Humaines, le Recrutement ou les Talents (ex: Responsable Ressources Humaines, RH, DRH, RRH, HRBP, Talent Acquisition, Chargé de recrutement, Assistant RH, etc.), même si son entreprise est une banque ou un groupe financier.
+      - Ne classe JAMAIS un conseiller bancaire, chargé de clientèle ou gestionnaire de patrimoine en "recruiter" (classe-les en "sector_pro").
       - Extrait les champs : firstName, lastName, fullName, jobTitle, company, category, industry, location, linkedinUrl, email, phone, contactUrl (lien internet, URL de portail de contact ou site web vers lequel contacter cette personne lorsque le mail direct n'est pas disponible, y compris le lien global s'il s'applique à tous), education, notes.
 
       Texte à analyser :

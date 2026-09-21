@@ -130,32 +130,14 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
   const [formNotes, setFormNotes] = useState("");
 
   useEffect(() => {
+    // Auto-reconcile misclassified contacts (e.g. RH/Recruiters and bank advisors)
+    dbStore.reconcileContactCategories();
     const allContacts = dbStore.getContacts();
-
-    // Auto-reconcile misclassified contacts (e.g. bank advisors previously marked as recruiter)
-    let hasUpdates = false;
-    allContacts.forEach(c => {
-      const isAlumni = c.category === "alumni" || Boolean(c.academicPath) || (c.connectionPoints || []).some(p => /alumni|iut|uca|clermont/i.test(p)) || (c.categories || []).some(cat => cat.category === "academic");
-      const isHR = isHumanResourcesRole(c.jobTitle) || isHumanResourcesRole(c.normalizedJobTitle);
-      const isBank = isBankingAndFinanceRole(c.jobTitle, c.companyName) || isBankingAndFinanceRole(c.normalizedJobTitle, c.companyName);
-      
-      if (isAlumni && c.category !== "alumni") {
-        c.category = "alumni";
-        dbStore.updateContact(c);
-        hasUpdates = true;
-      } else if (c.category === "recruiter" && isBank && !isHR) {
-        c.category = isAlumni ? "alumni" : "sector_pro";
-        dbStore.updateContact(c);
-        hasUpdates = true;
-      }
-    });
-
-    const refreshed = hasUpdates ? dbStore.getContacts() : allContacts;
-    setContacts(refreshed);
+    setContacts(allContacts);
     setProfile(dbStore.getProfile());
 
     if (initialSelectedContactId) {
-      const match = refreshed.find(c => c.id === initialSelectedContactId);
+      const match = allContacts.find((c: Contact) => c.id === initialSelectedContactId);
       if (match) {
         setSelectedContact(match);
         if (onClearInitialContact) onClearInitialContact();
@@ -568,14 +550,15 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
           >
             {language === "en" ? "Import from text" : "Importer par texte"}
           </GlassButton>
-          <GlassButton 
-            variant="secondary" 
-            size="md"
+          <button 
+            type="button"
             onClick={() => setIsImportModalOpen(true)}
-            icon={<Upload className="w-3.5 h-3.5 text-[#9AA0B2]" />}
+            className="px-3.5 py-2 rounded-xl bg-[#0A66C2] hover:bg-[#004182] text-white font-semibold text-xs transition-all flex items-center gap-2 border border-[#0A66C2]/60 shadow-[0_4px_14px_rgba(10,102,194,0.35)] hover:shadow-[0_6px_20px_rgba(10,102,194,0.5)] hover:-translate-y-0.5 cursor-pointer shrink-0"
+            title="Importer vos relations LinkedIn (.csv)"
           >
-            {t.contacts.importLinkedin}
-          </GlassButton>
+            <Linkedin className="w-3.5 h-3.5 fill-current text-white shrink-0" />
+            <span>{t.contacts.importLinkedin}</span>
+          </button>
           <GlassButton 
             variant="primary" 
             size="md"

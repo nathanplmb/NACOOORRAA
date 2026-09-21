@@ -26,7 +26,9 @@ import {
   ArrowRight, 
   Check, 
   ChevronDown,
-  Info
+  Info,
+  Linkedin,
+  ExternalLink
 } from "lucide-react";
 
 interface LinkedInImportModalProps {
@@ -427,18 +429,18 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
         {/* Header - Fixed & Compact */}
         <div className="flex items-center justify-between px-5 sm:px-6 py-3.5 border-b border-white/10 bg-white/[0.02] shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-[rgba(216,26,69,0.18)] border border-[rgba(216,26,69,0.35)] flex items-center justify-center text-[#ff6685] shrink-0">
-              <FileSpreadsheet className="w-4 h-4" />
+            <div className="w-8 h-8 rounded-xl bg-[#0A66C2]/20 border border-[#0A66C2]/50 flex items-center justify-center text-[#38BDF8] shrink-0 shadow-sm">
+              <Linkedin className="w-4 h-4 fill-current" />
             </div>
             <div className="min-w-0">
               <h3 className="text-sm sm:text-base font-bold text-[#F5F6FA] font-display truncate">
-                Importation des connexions LinkedIn
+                Importation des contacts LinkedIn
               </h3>
               <p className="text-xs text-[#9AA0B2] truncate mt-0.5">
                 {step === "upload" && "Importez votre fichier officiel Connections.csv de LinkedIn"}
                 {step === "processing" && "Analyse des contacts en cours…"}
                 {step === "preview" && "Vérifiez la liste des contacts et confirmez l'importation"}
-                {step === "done" && "Importation finalisée dans votre espace réseau"}
+                {step === "done" && "Importation finalisée dans votre carnet d'adresses"}
               </p>
             </div>
           </div>
@@ -456,23 +458,63 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
           {step === "upload" && (
             <div className="space-y-4">
               {/* Instructions Guide */}
-              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-bold text-[#F5F6FA] uppercase tracking-wider">
-                  <Info className="w-3.5 h-3.5 text-[#ff6685]" />
-                  Comment obtenir votre fichier d'export LinkedIn :
+              <div className="p-4 rounded-2xl bg-white/[0.035] border border-white/10 space-y-3 shadow-md backdrop-blur-xl">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-white/5">
+                  <div className="flex items-center gap-2 text-xs font-bold text-[#F5F6FA] uppercase tracking-wider">
+                    <Linkedin className="w-3.5 h-3.5 text-[#38BDF8] fill-current" />
+                    Comment exporter vos données LinkedIn :
+                  </div>
+                  <a
+                    href="https://www.linkedin.com/mypreferences/d/download-my-data"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#0A66C2] hover:bg-[#004182] text-white font-bold text-xs transition-all shadow-[0_4px_12px_rgba(10,102,194,0.35)] hover:-translate-y-0.5 cursor-pointer w-fit"
+                  >
+                    <Linkedin className="w-3.5 h-3.5 fill-current" />
+                    <span>Ouvrir l'export LinkedIn</span>
+                    <ExternalLink className="w-3 h-3 text-white/80" />
+                  </a>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs text-[#9AA0B2]">
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 space-y-0.5">
-                    <span className="font-bold text-[#F5F6FA] text-[11px]">1. Réseau LinkedIn</span>
-                    <p className="text-[11px] leading-snug">Rendez-vous sur LinkedIn &gt; Onglet <strong>Réseau</strong> &gt; <strong>Contacts</strong>.</p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs text-[#9AA0B2]">
+                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-[#F5F6FA] text-xs">
+                      <span className="w-4 h-4 rounded-full bg-white/10 text-[10px] flex items-center justify-center text-white shrink-0">1</span>
+                      <span>Sur LinkedIn</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-[#9AA0B2]">
+                      Moi → Préférences et confidentialité → <strong className="text-[#F5F6FA]">Obtenir une copie de vos données</strong>.
+                    </p>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 space-y-0.5">
-                    <span className="font-bold text-[#F5F6FA] text-[11px]">2. Exporter les données</span>
-                    <p className="text-[11px] leading-snug">Cliquez sur <strong>Gérer mes contacts</strong> &gt; <strong>Exporter</strong>.</p>
+
+                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-[#F5F6FA] text-xs">
+                      <span className="w-4 h-4 rounded-full bg-[#0A66C2]/40 text-[10px] flex items-center justify-center text-[#38BDF8] shrink-0">2</span>
+                      <span>Sélectionnez</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-[#9AA0B2]">
+                      Cochez <strong className="text-[#38BDF8]">« Connections »</strong> (contacts) et <strong className="text-[#38BDF8]">« Job Applications »</strong> (candidatures).
+                    </p>
                   </div>
-                  <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5 space-y-0.5">
-                    <span className="font-bold text-[#F5F6FA] text-[11px]">3. Déposer le CSV</span>
-                    <p className="text-[11px] leading-snug">Téléchargez l'archive et déposez <strong>Connections.csv</strong> ici.</p>
+
+                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-[#F5F6FA] text-xs">
+                      <span className="w-4 h-4 rounded-full bg-white/10 text-[10px] flex items-center justify-center text-white shrink-0">3</span>
+                      <span>Email reçu</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-[#9AA0B2]">
+                      LinkedIn vous envoie une archive <strong className="text-[#F5F6FA]">.zip</strong> par e-mail en quelques minutes.
+                    </p>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-[#F5F6FA] text-xs">
+                      <span className="w-4 h-4 rounded-full bg-[#34D399]/20 text-[10px] flex items-center justify-center text-[#34D399] shrink-0">4</span>
+                      <span>Revenez ici</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-[#9AA0B2]">
+                      Déposez <strong className="text-[#34D399]">Connections.csv</strong> ici (Contacts), et <strong className="text-[#FF6685]">Job Applications.csv</strong> dans l'onglet Tableau.
+                    </p>
                   </div>
                 </div>
               </div>

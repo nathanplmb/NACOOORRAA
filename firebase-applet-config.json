@@ -3,7 +3,7 @@
   "appId": "1:350691239439:web:2617d86342605a302da57a",
   "apiKey": "AIzaSyB3L2bIibXwEYbuj66W-J5hjkNp6x4MOAk",
   "authDomain": "nacora-7c9d2.firebaseapp.com",
-  "firestoreDatabaseId": "",
+  "firestoreDatabaseId": "(default)",
   "storageBucket": "nacora-7c9d2.firebasestorage.app",
   "messagingSenderId": "350691239439",
   "measurementId": "G-LHDBW2YD6G",
