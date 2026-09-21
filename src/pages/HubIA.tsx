@@ -443,7 +443,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
       <div className="xl:hidden flex items-center justify-between p-3 rounded-2xl bg-white/[0.03] border border-white/10 backdrop-blur-xl">
         <div className="flex items-center gap-2 text-xs font-semibold text-[#F5F6FA]">
           <Sparkles className="w-4 h-4 text-[#C084FC]" />
-          <span>Hub IA NACORA • {currentSpecialist.name}</span>
+          <span>NACORA Coaching • {currentSpecialist.name}</span>
         </div>
         <button
           onClick={() => setShowMobileContextDrawer(!showMobileContextDrawer)}

@@ -20,6 +20,7 @@ interface AuthContextType {
   loading: boolean;
   authError: string | null;
   loginWithGoogle: () => Promise<void>;
+  loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -88,26 +89,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const user = result.user;
       await establishUserSession(
         user.uid,
-        user.email || "utilisateur.google@nacora.app",
-        user.displayName || "Utilisateur Google",
+        user.email || "utilisateur@nacora.app",
+        user.displayName || user.email?.split("@")[0] || "Utilisateur Google",
         user.photoURL || undefined
       );
     } catch (e: any) {
-      console.error("Google Auth popup error:", e);
-      if (e?.code === "auth/popup-closed-by-user") {
-        setAuthError("La fenêtre de connexion Google a été fermée.");
-      } else if (e?.code === "auth/operation-not-allowed") {
-        setAuthError("Le fournisseur Google n'est pas activé dans la console Firebase (Authentication > Méthode de connexion).");
+      console.error("Google Auth error:", e);
+      const errorCode = e?.code || "";
+      const currentHost = typeof window !== "undefined" ? window.location.hostname : "ce domaine";
+
+      if (errorCode === "auth/popup-closed-by-user") {
+        setAuthError("La fenêtre de sélection de compte Google a été fermée avant la finalisation.");
+      } else if (errorCode === "auth/popup-blocked") {
+        setAuthError("La fenêtre contextuelle Google a été bloquée par votre navigateur. Veuillez autoriser les popups pour ce site.");
+      } else if (errorCode === "auth/unauthorized-domain") {
+        setAuthError(`Le domaine actuel (${currentHost}) n'est pas autorisé dans Firebase. Ajoutez "${currentHost}" dans Firebase Console > Authentication > Paramètres > Domaines autorisés.`);
+      } else if (errorCode === "auth/operation-not-allowed") {
+        setAuthError("Le fournisseur Google n'est pas activé dans votre projet Firebase (Authentication > Méthode de connexion > Google).");
+      } else if (errorCode === "auth/cancelled-popup-request") {
+        setAuthError("Une tentative de connexion était déjà en cours.");
       } else {
-        // Fallback robust simulation if popup restricted in preview sandbox
-        const uid = "usr_google_" + Math.random().toString(36).substring(2, 10);
-        await establishUserSession(
-          uid,
-          "utilisateur.google@nacora.app",
-          "Candidat Google"
-        );
+        setAuthError(e?.message || "Échec de la connexion avec Google. Vérifiez votre configuration Firebase.");
       }
+      throw e;
     }
+  };
+
+  const loginAsGuest = async () => {
+    clearError();
+    const uid = "usr_guest_" + Math.random().toString(36).substring(2, 10);
+    await establishUserSession(
+      uid,
+      "candidat.demo@nacora.app",
+      "Candidat Démo"
+    );
   };
 
   const logout = async () => {
@@ -129,6 +144,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         authError,
         loginWithGoogle,
+        loginAsGuest,
         logout,
         clearError
       }}

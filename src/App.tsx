@@ -18,6 +18,7 @@ import { TermsOfService } from "./pages/TermsOfService";
 import { NotFound } from "./pages/NotFound";
 import { CookieBanner } from "./components/CookieBanner";
 import { Toast, Badge } from "./components/Shared";
+import { NacoraLogo, NacoraIcon, NacoraWordmark } from "./components/NacoraLogo";
 import { 
   Home as HomeIcon, 
   Briefcase, 
@@ -206,11 +207,8 @@ export default function App() {
             {sidebarOpen ? <X className="w-5 h-5 text-[#FF6685]" /> : <Menu className="w-5 h-5 text-[#F5F6FA]" />}
           </button>
 
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-[#D81A45] to-[#FF1A55] flex items-center justify-center font-extrabold text-white text-sm shadow-[0_0_14px_rgba(216,26,69,0.5)]">
-              N
-            </div>
-            <span className="text-base font-black text-[#F5F6FA] tracking-wider font-display">NACORA</span>
+          <div className="flex items-center gap-2">
+            <NacoraLogo size="sm" showSubtitle={false} />
           </div>
 
           <div className="h-4 w-px bg-white/10 mx-1 hidden sm:block" />
@@ -245,16 +243,18 @@ export default function App() {
       >
         {/* Brand logo & title */}
         <div className={`flex items-center mb-6 pb-4 border-b border-white/10 transition-all duration-300 ${
-          isExpanded ? 'px-1 gap-3.5' : 'justify-center px-0'
+          isExpanded ? 'px-2 gap-3' : 'justify-center px-0'
         }`}>
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#D81A45] to-[#FF1A55] flex items-center justify-center font-black text-white text-lg shadow-[0_0_24px_rgba(216,26,69,0.55)] border border-white/20 shrink-0">
-            N
+          <div className="relative shrink-0 flex items-center justify-center">
+            <NacoraIcon className="w-9 h-9 drop-shadow-[0_0_16px_rgba(225,29,72,0.45)] cursor-pointer hover:scale-105 transition-transform" />
           </div>
           <div className={`overflow-hidden transition-all duration-300 ${
             isExpanded ? 'opacity-100 max-w-[160px]' : 'opacity-0 max-w-0 pointer-events-none'
           }`}>
-            <span className="text-xl font-black text-[#F5F6FA] tracking-wider block font-display whitespace-nowrap">NACORA</span>
-            <span className="text-[10px] text-[#9AA0B2] uppercase tracking-widest font-semibold whitespace-nowrap">Career AI</span>
+            <NacoraWordmark className="h-5" />
+            <span className="text-[10px] text-[#9AA0B2] uppercase tracking-widest font-semibold block mt-0.5 whitespace-nowrap">
+              {language === "en" ? "Career Platform" : "Plateforme Carrière"}
+            </span>
           </div>
         </div>
 
@@ -301,7 +301,7 @@ export default function App() {
             <span className={`text-[10px] text-[#9AA0B2]/70 uppercase tracking-wider font-bold select-none px-2 flex items-center gap-1.5 transition-all duration-300 whitespace-nowrap overflow-hidden ${
               isExpanded ? 'opacity-100 max-h-6 mb-1.5' : 'opacity-0 max-h-0 mb-0 pointer-events-none'
             }`}>
-              <Sparkles className="w-3.5 h-3.5 text-[#C084FC] shrink-0" />
+              <Compass className="w-3.5 h-3.5 text-[#C084FC] shrink-0" />
               <span>{t.nav.aiAccelerators}</span>
             </span>
             <div className="space-y-1">
@@ -424,9 +424,9 @@ export default function App() {
               </span>
             </div>
 
-            {/* AI Status Pill */}
-            <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-full bg-[rgba(192,132,252,0.1)] border border-[rgba(192,132,252,0.25)] text-[#C084FC]">
-              <Sparkles className="w-3 h-3 text-[#C084FC]" />
+            {/* Connection Status Pill */}
+            <div className="hidden xl:flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               <span className="text-[11px] font-semibold">{t.nav.aiActive}</span>
             </div>
 

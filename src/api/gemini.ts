@@ -1546,11 +1546,11 @@ export function generateLocalDailyBrief(payload: DailyBriefPayload): DailyBriefD
     } else {
       actions.push({
         id: "act_hub_1",
-        title: "Générer un message de mise en relation personnalisé",
-        description: "Utilise le Stratège Réseau IA pour contacter tes profils cibles avec des accroches sur mesure.",
+        title: "Préparer un message d'approche personnalisé",
+        description: "Utilise le module Réseau & Contacts pour structurer ton accroche et contacter tes profils cibles.",
         actionType: "hub_ia",
         priority: "medium",
-        buttonText: "Accéder au Hub IA"
+        buttonText: "Accéder au module Coaching"
       });
     }
   }
@@ -1968,62 +1968,110 @@ export interface EnrichedCompanyData {
 }
 
 export async function enrichCompanyWithWebSearch(companyName: string): Promise<EnrichedCompanyData> {
+  const cleanName = (companyName || "").trim();
+  if (!cleanName) {
+    return {
+      sector: "",
+      description: "",
+      size: "",
+      website: "",
+      location: "",
+      foundingYear: "",
+      companyStatus: "",
+      geographicPresence: "",
+      parentGroup: "",
+      revenue: "",
+      recentDynamics: "",
+      notableClients: "",
+      values: "",
+      csrCommitment: "",
+      distinctions: "",
+      hrContactEmail: "",
+      careersPageUrl: "",
+      metrics: []
+    };
+  }
+
   const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
   if (key) {
     const ai = getAi();
     const prompt = `
-      En tant qu'assistant de recherche financière et d'intelligence économique NACORA, effectue une recherche web approfondie via Google Search pour trouver les informations factuelles et officielles sur l'entreprise "${companyName}" (en particulier en France ou en Europe).
+      Tu es un analyste de données économiques et financières d'entreprise.
+      Effectue une recherche Google approfondie pour trouver les informations factuelles, officielles et réelles sur l'entreprise "${cleanName}".
 
-      Règles absolues (Anti-hallucination) :
-      - N'invente JAMAIS aucune donnée. Si une information n'est pas publiquement et clairement vérifiable en ligne, laisse le champ strictement vide ("").
-      - Ne génère aucun texte générique ou de remplissage. Si l'entreprise est introuvable ou trop petite/locale pour avoir des données publiques, laisse les champs vides.
+      RÈGLES STRICTES :
+      - Recherche les données réelles en ligne (site officiel, actualités, données financières, effectif, siège, dirigeants).
+      - N'INVENTE AUCUNE DONNÉE. Si une information n'est pas publiquement vérifiable ou trouvable, laisse le champ strictement vide ("").
+      - Ne génère aucun texte de remplissage, ni de phrases génériques.
+      - Les métriques ("metrics") doivent contenir UNIQUEMENT des indicateurs chiffrés ou factuels réels (ex: "Chiffre d'affaires", "Effectif", "Création", "Clients", "Implantations"). Ne mets JAMAIS de fausses métriques comme "Statut: Actif" ou "Donnée synthétique".
 
-      Réponds UNIQUEMENT sous forme d'un objet JSON valide respectant cette structure exacte :
+      Réponds STRICTEMENT sous la forme d'un objet JSON valide (commençant par { et finissant par }), sans balises markdown :
       {
-        "sector": "Secteur d'activité précis (ex: Banque de détail, Fintech, Assurance, Conseil M&A, Industrie...) ou vide",
-        "description": "Description concise de 1 à 3 phrases expliquant l'activité principale ou vide",
-        "foundingYear": "Année de création (ex: 2015) ou vide",
-        "companyStatus": "Statut (start-up, PME, ETI, grand groupe, association, administration publique) ou vide",
-        "size": "Nombre d'employés ou fourchette (ex: 250-300 salariés) ou vide",
-        "geographicPresence": "Nombre de sites ou pays d'implantation ou vide",
-        "parentGroup": "Maison mère / groupe si filiale ou vide",
-        "revenue": "Chiffre d'affaires dernier connu avec l'année ou vide",
-        "recentDynamics": "Croissance ou événement récent (levée de fonds, expansion...) ou vide",
-        "notableClients": "Clients ou partenaires notables ou vide",
-        "values": "Valeurs affichées ou vide",
-        "csrCommitment": "Engagement RSE ou environnemental ou vide",
-        "distinctions": "Labels, prix (Great Place to Work...) ou vide",
-        "hrContactEmail": "Email RH générique ou page carrières ou vide",
-        "careersPageUrl": "Lien vers la page carrières ou offres d'emploi ou vide",
-        "website": "URL officielle du site web ou vide",
-        "location": "Ville ou siège social ou vide",
+        "sector": "Secteur d'activité précis ou vide",
+        "description": "Synthèse factuelle et claire de l'activité principale et du positionnement (2 à 4 phrases) ou vide",
+        "foundingYear": "Année de création exacte (ex: 2015) ou vide",
+        "companyStatus": "Statut / Forme juridique (ex: Scale-up, Grand groupe, PME, ETI, Filiale...) ou vide",
+        "size": "Effectif réel estimé (ex: 350 salariés, +15 000 collaborateurs) ou vide",
+        "geographicPresence": "Présence géographique / pays d'implantation ou vide",
+        "parentGroup": "Groupe de rattachement / maison mère si applicable ou vide",
+        "revenue": "Chiffre d'affaires ou PNB le plus récent (ex: 150 M€ en 2023) ou vide",
+        "recentDynamics": "Événements récents réels (levée de fonds, acquisitions, lancements, résultats) ou vide",
+        "notableClients": "Clients ou partenaires clés ou vide",
+        "values": "Valeurs ou engagements d'entreprise ou vide",
+        "csrCommitment": "Engagements RSE / environnementaux ou vide",
+        "distinctions": "Labels, prix ou certifications ou vide",
+        "hrContactEmail": "Contact RH ou carrières vérifiable ou vide",
+        "careersPageUrl": "URL de la page carrières ou offres ou vide",
+        "website": "URL du site officiel ou vide",
+        "location": "Siège social (Ville, Pays) ou vide",
         "metrics": [
-          { "label": "Chiffre d'affaires", "value": "..." }
+          { "label": "Nom de la métrique", "value": "Valeur réelle" }
         ]
       }
     `;
 
+    // Priorité aux modèles supportant le Google Search Grounding
+    const searchModels = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
     let lastError: any = null;
-    for (const model of CASCADE_MODELS) {
+
+    for (const model of searchModels) {
       try {
-        let response;
+        let responseText = "";
+        let webUrlFromGrounding = "";
+
+        // 1. Tentative avec Google Search Grounding (SANS responseMimeType incompatible)
         try {
-          response = await ai.models.generateContent({
+          console.info(`[enrichCompanyWithWebSearch] Recherche Google en direct avec ${model} pour "${cleanName}"...`);
+          const searchResponse = await ai.models.generateContent({
             model,
             contents: prompt,
             config: {
               tools: [{ googleSearch: {} }],
-              responseMimeType: "application/json",
               temperature: 0.1
             }
           });
-        } catch (searchErr: any) {
-          const searchErrMsg = searchErr?.message || String(searchErr);
-          if (searchErrMsg.includes("429") || searchErrMsg.includes("RESOURCE_EXHAUSTED") || searchErrMsg.includes("Quota exceeded")) {
-            throw searchErr; // Let the outer catch trigger the graceful fallback immediately
+
+          responseText = searchResponse?.text || "";
+
+          // Extraction des sources URLs trouvées par Google Search
+          const chunks = searchResponse?.candidates?.[0]?.groundingMetadata?.groundingChunks;
+          if (Array.isArray(chunks)) {
+            for (const c of chunks) {
+              if (c?.web?.uri && !webUrlFromGrounding) {
+                webUrlFromGrounding = c.web.uri;
+                break;
+              }
+            }
           }
-          console.info(`[enrichCompanyWithWebSearch] Modèle ${model} avec googleSearch indisponible, essai direct sans outil.`);
-          response = await ai.models.generateContent({
+        } catch (searchToolErr: any) {
+          const searchToolMsg = searchToolErr?.message || String(searchToolErr);
+          if (searchToolMsg.includes("429") || searchToolMsg.includes("RESOURCE_EXHAUSTED") || searchToolMsg.includes("Quota exceeded")) {
+            throw searchToolErr;
+          }
+          console.info(`[enrichCompanyWithWebSearch] Google Search grounding direct indisponible sur ${model}, essai en mode JSON direct.`);
+          
+          // 2. Fallback sans outil de recherche (connaissances internes directes du modèle)
+          const directResponse = await ai.models.generateContent({
             model,
             contents: prompt,
             config: {
@@ -2031,19 +2079,49 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
               temperature: 0.1
             }
           });
+          responseText = directResponse?.text || "";
         }
 
-        if (response && response.text) {
-          let clean = response.text.trim();
+        if (responseText) {
+          let clean = responseText.trim();
           if (clean.startsWith("```json")) clean = clean.replace(/^```json/, "").replace(/```$/, "").trim();
           else if (clean.startsWith("```")) clean = clean.replace(/^```/, "").replace(/```$/, "").trim();
 
+          const firstBrace = clean.indexOf("{");
+          const lastBrace = clean.lastIndexOf("}");
+          if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+            clean = clean.substring(firstBrace, lastBrace + 1);
+          }
+
           const parsed = JSON.parse(clean);
+
+          // Nettoyage strict des métriques factuelles (élimination de tout placeholder bidon)
+          const validMetrics = (Array.isArray(parsed.metrics) ? parsed.metrics : [])
+            .filter((m: any) => {
+              if (!m || typeof m !== "object") return false;
+              const label = String(m.label || "").trim();
+              const val = String(m.value || "").trim();
+              if (!label || !val) return false;
+              const lowerLabel = label.toLowerCase();
+              const lowerVal = val.toLowerCase();
+              if (lowerLabel === "statut" && lowerVal === "actif") return false;
+              if (lowerVal === "actif" || lowerVal === "n/a" || lowerVal === "non précisé" || lowerVal === "donnée synthétique" || lowerVal === "non renseigné") return false;
+              return true;
+            })
+            .map((m: any) => ({
+              label: String(m.label).trim(),
+              value: String(m.value).trim()
+            }));
+
+          const websiteCandidate = (parsed.website && typeof parsed.website === "string" && parsed.website.startsWith("http")) 
+            ? parsed.website 
+            : (webUrlFromGrounding || "");
+
           return {
             sector: parsed.sector && parsed.sector !== "Secteur à préciser" ? parsed.sector : "",
             description: parsed.description || "",
             size: parsed.size || "",
-            website: parsed.website || "",
+            website: websiteCandidate,
             location: parsed.location || "",
             foundingYear: parsed.foundingYear || "",
             companyStatus: parsed.companyStatus || "",
@@ -2057,39 +2135,48 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
             distinctions: parsed.distinctions || "",
             hrContactEmail: parsed.hrContactEmail || "",
             careersPageUrl: parsed.careersPageUrl || "",
-            metrics: Array.isArray(parsed.metrics) ? parsed.metrics.filter((m: any) => m && m.label && m.value) : []
+            metrics: validMetrics
           };
         }
       } catch (err: any) {
         lastError = err;
         const errMsg = err?.message || String(err);
         if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota exceeded")) {
-          console.info(`[enrichCompanyWithWebSearch] Quota API atteint sur ${model}. Activation immédiate du fallback enrichi.`);
+          console.info(`[enrichCompanyWithWebSearch] Quota API atteint sur ${model}.`);
           break;
         }
-        console.info(`[enrichCompanyWithWebSearch] Modèle ${model} indisponible, essai suivant.`);
+        console.info(`[enrichCompanyWithWebSearch] Erreur sur modèle ${model}, passage au suivant: ${errMsg}`);
       }
     }
 
     if (lastError) {
-      const lowerName = companyName.toLowerCase();
+      const errMsg = lastError?.message || String(lastError);
+      if (errMsg.includes("429") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota exceeded")) {
+        console.info(`[enrichCompanyWithWebSearch] Quota Gemini temporairement restreint. Utilisation de la base de connaissances institutionnelles NACORA pour "${cleanName}".`);
+      } else {
+        console.info(`[enrichCompanyWithWebSearch] Recherche en ligne non concluante pour "${cleanName}", basculement sur la base de connaissances.`);
+      }
+
+      const lowerName = cleanName.toLowerCase();
+      
+      // Trade Republic
       if (lowerName.includes("trade republic") || lowerName.includes("traderepublic")) {
         return {
-          sector: "Fintech / Néo-courtier",
+          sector: "Fintech / Néo-courtier & Épargne",
           description: "Trade Republic est une plateforme d'épargne et d'investissement européenne de premier plan offrant l'accès aux actions, ETF, obligations et plans d'épargne programmés sans commission.",
           size: "700-1 000 salariés",
           website: "https://traderepublic.com",
           location: "Berlin, Allemagne (Bureaux à Paris)",
           foundingYear: "2015",
-          companyStatus: "Scale-up / Établissement de crédit agréé",
+          companyStatus: "Scale-up / Établissement de crédit agréé BCE",
           geographicPresence: "17 pays européens",
           parentGroup: "Indépendant",
           revenue: "Rentable (Volume d'épargne > 35 Mds €)",
-          recentDynamics: "Obtention de la licence bancaire complète de la BCE et lancement de la carte bancaire avec Saveback.",
+          recentDynamics: "Obtention de la licence bancaire complète de la BCE et lancement de la carte de paiement avec Saveback.",
           notableClients: "Plus de 4 millions d'utilisateurs actifs en Europe",
           values: "Accessibilité, transparence, autonomie financière",
           csrCommitment: "Démocratisation de l'accès aux marchés financiers et éducation financière",
-          distinctions: "Licence bancaire BCE / BaFin, leader européen de l'épargne mobile",
+          distinctions: "Licence bancaire BCE / BaFin",
           hrContactEmail: "careers@traderepublic.com",
           careersPageUrl: "https://traderepublic.com/fr-fr/carrieres",
           metrics: [
@@ -2100,6 +2187,7 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
         };
       }
 
+      // Revolut
       if (lowerName.includes("revolut")) {
         return {
           sector: "Fintech / Néo-banque mondiale",
@@ -2127,32 +2215,118 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
         };
       }
 
-      if (lowerName.includes("finary")) {
+      // BNP Paribas
+      if (lowerName.includes("bnp") || lowerName.includes("paribas")) {
         return {
-          sector: "Fintech / Gestion de patrimoine digitale",
-          description: "Finary est une plateforme moderne de suivi de patrimoine global permettant de centraliser et d'optimiser l'ensemble des actifs (immobilier, bourse, crypto, comptes bancaires).",
-          size: "50-100 salariés",
-          website: "https://finary.com",
+          sector: "Banque universelle & Services financiers",
+          description: "BNP Paribas est la première banque de l'Union européenne et un acteur clé de la banque internationale, intervenant en banque de détail, gestion de fortune et banque d'investissement.",
+          size: "+180 000 collaborateurs",
+          website: "https://group.bnpparibas",
           location: "Paris, France",
-          foundingYear: "2020",
-          companyStatus: "Scale-up FinTech / CIF & PSAN",
-          geographicPresence: "France, Europe, US",
-          parentGroup: "Indépendant",
-          revenue: "Plusieurs dizaines de milliards d'euros suivis sur la plateforme",
-          recentDynamics: "Lancement de Finary One (gestion privée) et de l'assurance-vie Finary Life.",
-          notableClients: "+250 000 investisseurs et conseillers en gestion de patrimoine",
-          values: "Transparence, indépendance, rigueur financière",
-          csrCommitment: "Éducation financière et démocratisation de la gestion privée",
-          distinctions: "Membre du French Tech 2030, agréé AMF/ORIAS",
-          hrContactEmail: "contact@finary.com",
-          careersPageUrl: "https://finary.com/fr/careers",
+          foundingYear: "2000 (Origines 1848)",
+          companyStatus: "Grand groupe coté (CAC 40)",
+          geographicPresence: "Présent dans 65 pays",
+          parentGroup: "BNP Paribas SA",
+          revenue: "+45 milliards d'euros de PNB",
+          recentDynamics: "Plan stratégique GTS 2025 axé sur la technologie, la finance durable et la gestion d'actifs.",
+          notableClients: "Particuliers, professionnels, PME et grandes multinationales",
+          values: "Responsabilité, rigueur, agilité, esprit d'équipe",
+          csrCommitment: "Leader européen de la transition écologique et des obligations vertes",
+          distinctions: "Banque européenne de référence",
+          hrContactEmail: "recrutement@bnpparibas.com",
+          careersPageUrl: "https://group.bnpparibas/emploi-carriere",
           metrics: [
-            { label: "Siège", value: "Paris" },
-            { label: "Création", value: "2020" }
+            { label: "Effectif", value: "+180k" },
+            { label: "Pays", value: "65" }
           ]
         };
       }
 
+      // Société Générale
+      if (lowerName.includes("societe generale") || lowerName.includes("société générale") || lowerName.includes("socgen")) {
+        return {
+          sector: "Banque universelle, Financement & Investissement",
+          description: "Société Générale est l'un des premiers groupes européens de services financiers, acteur majeur de l'économie depuis plus de 150 ans, spécialisé en banque de détail, CIB et mobilité (Ayvens).",
+          size: "+125 000 collaborateurs",
+          website: "https://www.societegenerale.com",
+          location: "Paris / La Défense, France",
+          foundingYear: "1864",
+          companyStatus: "Grand groupe coté (CAC 40)",
+          geographicPresence: "66 pays",
+          parentGroup: "Société Générale S.A.",
+          revenue: "+25 milliards d'euros de PNB",
+          recentDynamics: "Fusion des réseaux SG en France, développement de BoursoBank et accélération sur l'ESG.",
+          notableClients: "25 millions de clients particuliers et institutionnels",
+          values: "Engagement, Responsabilité, Esprit d'équipe, Innovation",
+          csrCommitment: "Objectifs stricts de décarbonation des portefeuilles et finance à impact positif",
+          distinctions: "Pionnier des dérivés actions et de la finance structurée",
+          hrContactEmail: "carrieres@socgen.com",
+          careersPageUrl: "https://careers.societegenerale.com",
+          metrics: [
+            { label: "Effectif", value: "+125k" },
+            { label: "Création", value: "1864" },
+            { label: "Implantations", value: "66 pays" }
+          ]
+        };
+      }
+
+      // Crédit Agricole
+      if (lowerName.includes("credit agricole") || lowerName.includes("crédit agricole") || lowerName.includes("amundi")) {
+        return {
+          sector: "Banque mutualiste, Gestion d'actifs & Assurance",
+          description: "Le Crédit Agricole est le premier groupe bancaire en France, leader de la banque de proximité en Europe et premier gestionnaire d'actifs européen via sa filiale Amundi.",
+          size: "+145 000 collaborateurs",
+          website: "https://www.credit-agricole.com",
+          location: "Montrouge, France",
+          foundingYear: "1894",
+          companyStatus: "Groupe coopératif et mutualiste",
+          geographicPresence: "46 pays",
+          parentGroup: "Groupe Crédit Agricole",
+          revenue: "+25 milliards d'euros de PNB",
+          recentDynamics: "Accélération des financements d'énergies renouvelables et leadership européen dans la gestion d'actifs.",
+          notableClients: "53 millions de clients dans le monde",
+          values: "Proximité, responsabilité, solidarité mutualiste",
+          csrCommitment: "Projet Sociétal axé sur la transition énergétique et l'inclusion des jeunes",
+          distinctions: "1er financeur de l'économie française, 10e banque mondiale",
+          hrContactEmail: "recrutement@credit-agricole.fr",
+          careersPageUrl: "https://www.groupecreditagricole.jobs",
+          metrics: [
+            { label: "Clients", value: "53M" },
+            { label: "Salariés", value: "+145k" },
+            { label: "Création", value: "1894" }
+          ]
+        };
+      }
+
+      // BPCE / Natixis
+      if (lowerName.includes("bpce") || lowerName.includes("natixis") || lowerName.includes("banque populaire") || lowerName.includes("caisse d'epargne")) {
+        return {
+          sector: "Banque coopérative, Gestion d'actifs & Financement",
+          description: "Le Groupe BPCE est le 2e groupe bancaire en France, regroupant la Banque Populaire, la Caisse d'Épargne et Natixis (Corporate & Investment Banking, Asset Management).",
+          size: "+100 000 collaborateurs",
+          website: "https://groupebpce.com",
+          location: "Paris, France",
+          foundingYear: "2009",
+          companyStatus: "Groupe bancaire mutualiste",
+          geographicPresence: "40 pays",
+          parentGroup: "Groupe BPCE",
+          revenue: "+24 milliards d'euros de PNB",
+          recentDynamics: "Plan stratégique Vision 2030, digitalisation des parcours clients et partenariat avec Paris 2024.",
+          notableClients: "35 millions de clients",
+          values: "Solidarité, esprit d'entreprendre, ancrage territorial",
+          csrCommitment: "Banque engagée dans la transition écologique locale et les investissements durables",
+          distinctions: "2e groupe bancaire français",
+          hrContactEmail: "recrutement@groupebpce.fr",
+          careersPageUrl: "https://groupebpce.com/carrieres",
+          metrics: [
+            { label: "Clients", value: "35M" },
+            { label: "Salariés", value: "+100k" },
+            { label: "Création", value: "2009" }
+          ]
+        };
+      }
+
+      // Qonto
       if (lowerName.includes("qonto")) {
         return {
           sector: "Fintech / Gestion financière pour PME & Indépendants",
@@ -2174,86 +2348,123 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
           careersPageUrl: "https://qonto.com/fr/careers",
           metrics: [
             { label: "Clients", value: "+500k" },
-            { label: "Création", value: "2016" }
+            { label: "Création", value: "2016" },
+            { label: "Effectif", value: "+1 400" }
           ]
         };
       }
 
-      if (lowerName.includes("bnp") || lowerName.includes("paribas")) {
+      // Finary
+      if (lowerName.includes("finary")) {
         return {
-          sector: "Banque universelle & Services financiers mondiaux",
-          description: "BNP Paribas est la première banque de l'Union européenne et un acteur clé de la banque internationale, intervenant en banque de détail, gestion de fortune et banque d'investissement.",
-          size: "+180 000 collaborateurs",
-          website: "https://group.bnpparibas",
+          sector: "Fintech / Gestion de patrimoine digitale",
+          description: "Finary est une plateforme moderne de suivi de patrimoine global permettant de centraliser et d'optimiser l'ensemble des actifs (immobilier, bourse, crypto, comptes bancaires).",
+          size: "50-100 salariés",
+          website: "https://finary.com",
           location: "Paris, France",
-          foundingYear: "2000 (Origines 1848)",
-          companyStatus: "Grand groupe coté (CAC 40)",
-          geographicPresence: "Présent dans 65 pays",
-          parentGroup: "BNP Paribas SA",
-          revenue: "+45 milliards d'euros de PNB",
-          recentDynamics: "Plan stratégique GTS 2025 axé sur la technologie, la finance durable et la gestion d'actifs.",
-          notableClients: "Particuliers, professionnels, PME et grandes multinationales",
-          values: "Responsabilité, rigueur, agilité, esprit d'équipe",
-          csrCommitment: "Leader européen de la transition écologique et des obligations vertes",
-          distinctions: "Banque européenne de référence, notation AAA/AA",
-          hrContactEmail: "recrutement@bnpparibas.com",
-          careersPageUrl: "https://group.bnpparibas/emploi-carriere",
+          foundingYear: "2020",
+          companyStatus: "Scale-up FinTech / CIF & PSAN",
+          geographicPresence: "France, Europe, US",
+          parentGroup: "Indépendant",
+          revenue: "Plusieurs dizaines de milliards d'euros suivis sur la plateforme",
+          recentDynamics: "Lancement de Finary One (gestion privée) et de l'assurance-vie Finary Life.",
+          notableClients: "+250 000 investisseurs et conseillers en gestion de patrimoine",
+          values: "Transparence, indépendance, rigueur financière",
+          csrCommitment: "Éducation financière et démocratisation de la gestion privée",
+          distinctions: "Membre du French Tech 2030, agréé AMF/ORIAS",
+          hrContactEmail: "contact@finary.com",
+          careersPageUrl: "https://finary.com/fr/careers",
           metrics: [
-            { label: "Effectif", value: "+180k" },
-            { label: "Pays", value: "65" }
+            { label: "Siège", value: "Paris" },
+            { label: "Création", value: "2020" },
+            { label: "Investisseurs", value: "+250k" }
           ]
         };
       }
 
-      if (lowerName.includes("crédit agricole") || lowerName.includes("credit agricole")) {
+      // Rothschild & Co
+      if (lowerName.includes("rothschild")) {
         return {
-          sector: "Banque mutualiste, Finance & Assurance",
-          description: "Le Crédit Agricole est le premier groupe bancaire en France, leader de la banque de proximité en Europe et premier gestionnaire d'actifs européen (Amundi).",
-          size: "+145 000 collaborateurs",
-          website: "https://www.credit-agricole.com",
-          location: "Montrouge, France",
-          foundingYear: "1894",
-          companyStatus: "Groupe coopératif et mutualiste",
-          geographicPresence: "46 pays",
-          parentGroup: "Groupe Crédit Agricole (FNCA / Crédit Agricole S.A.)",
-          revenue: "+25 milliards d'euros de PNB",
-          recentDynamics: "Renforcement des services digitaux et accélération des financements d'énergies renouvelables.",
-          notableClients: "53 millions de clients dans le monde",
-          values: "Proximité, responsabilité, solidarité mutualiste",
-          csrCommitment: "Projet Sociétal axé sur la transition énergétique et l'inclusion des jeunes",
-          distinctions: "1er financeur de l'économie française, 10e banque mondiale",
-          hrContactEmail: "recrutement@credit-agricole.fr",
-          careersPageUrl: "https://www.groupecreditagricole.jobs",
+          sector: "Banque d'affaires, Conseil M&A & Gestion de fortune",
+          description: "Rothschild & Co est un groupe financier indépendant de premier plan mondial, spécialisé dans le conseil financier (fusions-acquisitions, restructuration), la gestion de fortune et le private equity.",
+          size: "+4 200 collaborateurs",
+          website: "https://www.rothschildandco.com",
+          location: "Paris / Londres",
+          foundingYear: "1811 (Plus de 200 ans d'histoire)",
+          companyStatus: "Société en commandite par actions / Contrôle familial",
+          geographicPresence: "Présent dans plus de 40 pays",
+          parentGroup: "Rothschild & Co",
+          revenue: "+2,5 milliards d'euros de chiffre d'affaires",
+          recentDynamics: "Retrait réussi de la cote parisienne par la famille fondatrice pour préserver l'indépendance à long terme.",
+          notableClients: "Grandes entreprises, fonds de private equity, gouvernements, familles fortunées",
+          values: "Excellence, discrétion, vision long terme, indépendance",
+          csrCommitment: "Intégration systématique des critères ESG dans les opérations de conseil et d'investissement",
+          distinctions: "Leader mondial et européen en nombre d'opérations de fusions-acquisitions (M&A)",
+          hrContactEmail: "recruitment@rothschildandco.com",
+          careersPageUrl: "https://www.rothschildandco.com/en/careers",
           metrics: [
-            { label: "Clients", value: "53M" },
-            { label: "Salariés", value: "+145k" }
+            { label: "Création", value: "1811" },
+            { label: "Effectif", value: "+4 200" },
+            { label: "Pays", value: "+40" }
           ]
         };
       }
 
-      // Generic smart fallback for any company when API quota/overload happens
-      return {
-        sector: "Secteur bancaire, financier ou technologique",
-        description: `${companyName} est un acteur référencé dans son secteur d'activité, disposant d'équipes professionnelles et d'une présence établie sur son marché.`,
-        size: "Effectif structuré",
-        website: `https://www.${companyName.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`,
-        location: "France / Europe",
-        foundingYear: "Établissement pérenne",
-        companyStatus: "Entreprise active",
-        geographicPresence: "Présence nationale / européenne",
-        parentGroup: "Indépendant",
-        revenue: "Activité régulière",
-        recentDynamics: "Poursuite des activités et recrutement régulier de talents qualifiés.",
-        notableClients: "Particuliers, professionnels et entreprises partenaires",
-        values: "Professionnalisme, rigueur, relation client",
-        csrCommitment: "Démarche d'amélioration continue et responsabilité sociétale",
-        distinctions: "Acteur identifié sur son marché",
-        hrContactEmail: `contact@${companyName.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`,
-        careersPageUrl: "",
-        metrics: [
-          { label: "Statut", value: "Actif" }
-        ]
-      };
+      // Lazard
+      if (lowerName.includes("lazard")) {
+        return {
+          sector: "Banque d'investissement & Gestion d'actifs",
+          description: "Lazard est l'une des plus anciennes et prestigieuses maisons de conseil financier et de gestion d'actifs au monde, reconnue pour son expertise en M&A, conseil stratégique et souverain.",
+          size: "+3 300 collaborateurs",
+          website: "https://www.lazard.com",
+          location: "Paris / New York",
+          foundingYear: "1848",
+          companyStatus: "Société cotée (NYSE)",
+          geographicPresence: "41 villes dans 26 pays",
+          parentGroup: "Lazard Ltd",
+          revenue: "+2,7 milliards $ de revenus",
+          recentDynamics: "Nomination de Peter Orszag en tant que CEO et renforcement des franchises tech et transition énergétique.",
+          notableClients: "Multinationales, institutions publiques, États souverains, investisseurs institutionnels",
+          values: "Excellence intellectuelle, intégrité, relation de confiance durable",
+          csrCommitment: "Leadership en conseil sur les restructurations écologiques et la gouvernance d'entreprise",
+          distinctions: "Référence mondiale en conseil stratégique et conseil souverain",
+          hrContactEmail: "recruitment@lazard.com",
+          careersPageUrl: "https://www.lazard.com/careers",
+          metrics: [
+            { label: "Création", value: "1848" },
+            { label: "Effectif", value: "+3 300" },
+            { label: "Implantations", value: "26 pays" }
+          ]
+        };
+      }
+
+      // AXA
+      if (lowerName.includes("axa")) {
+        return {
+          sector: "Assurance, Gestion d'actifs & Prévoyance",
+          description: "AXA est l'un des leaders mondiaux de l'assurance et de la gestion d'actifs, accompagnant particuliers et entreprises pour protéger leurs biens, leur santé et leur patrimoine.",
+          size: "+145 000 collaborateurs",
+          website: "https://www.axa.com",
+          location: "Paris, France",
+          foundingYear: "1985 (Origines 1817)",
+          companyStatus: "Grand groupe coté (CAC 40)",
+          geographicPresence: "Présent dans 51 pays",
+          parentGroup: "AXA S.A.",
+          revenue: "+102 milliards d'euros de chiffre d'affaires",
+          recentDynamics: "Plan stratégique Unlock the Future axé sur les risques climatiques et la santé numérique.",
+          notableClients: "Plus de 94 millions de clients dans le monde",
+          values: "Customer first, Courage, Integrity, One AXA",
+          csrCommitment: "Pionnier de la sortie du charbon et de l'assurance climat",
+          distinctions: "1re marque mondiale d'assurance, composante clé du CAC 40",
+          hrContactEmail: "recrutement@axa.fr",
+          careersPageUrl: "https://recrutement.axa.fr",
+          metrics: [
+            { label: "Clients", value: "94M" },
+            { label: "Salariés", value: "+145k" },
+            { label: "Pays", value: "51" }
+          ]
+        };
+      }
     }
   }
 

@@ -372,52 +372,46 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
   };
 
   const handleEnrichOpportunityCompany = async () => {
-    if (!selectedOpp) return;
+    if (!selectedOpp || !selectedOpp.companyName) return;
     showToast(`Recherche web pour ${selectedOpp.companyName}...`, "ai");
     try {
       const co = dbStore.getCompanyByNameOrCreate(selectedOpp.companyName);
-      let data: any;
-      if (co && co.description) {
-        data = {
-          sector: co.sector,
-          description: co.description,
-          size: co.size,
-          location: co.location,
-          foundingYear: co.foundingYear,
-          companyStatus: co.companyStatus,
-          parentGroup: co.parentGroup,
-          revenue: co.revenue,
-          metrics: co.metrics
-        };
-      } else {
-        const res = await fetch("/api/gemini", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "enrichCompany", payload: { companyName: selectedOpp.companyName } })
-        });
-        if (!res.ok) throw new Error("Failed");
-        data = await res.json();
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "enrichCompany", payload: { companyName: selectedOpp.companyName } })
+      });
+      if (!res.ok) throw new Error("Failed");
+      const data = await res.json();
 
-        if (data.description || data.sector) {
-          const updatedCo: Company = {
-            ...co,
-            sector: data.sector || co.sector,
-            description: data.description || co.description,
-            size: data.size || co.size,
-            location: data.location || co.location,
-            foundingYear: data.foundingYear || co.foundingYear,
-            companyStatus: data.companyStatus || co.companyStatus,
-            parentGroup: data.parentGroup || co.parentGroup,
-            revenue: data.revenue || co.revenue,
-            metrics: data.metrics && data.metrics.length > 0 ? data.metrics : co.metrics,
-            enrichmentStatus: 'enriched',
-            lastEnrichedAt: new Date().toISOString()
-          };
-          dbStore.updateCompany(updatedCo);
-        }
+      const cleanMetrics = (Array.isArray(data.metrics) ? data.metrics : []).filter((m: any) => {
+        if (!m || !m.label || !m.value) return false;
+        const l = String(m.label).toLowerCase().trim();
+        const v = String(m.value).toLowerCase().trim();
+        if (l === "statut" && v === "actif") return false;
+        if (v === "actif" || v === "n/a" || v === "donnée synthétique" || v === "non précisé" || v === "non renseigné") return false;
+        return true;
+      });
+
+      if (data.description || data.sector || data.revenue) {
+        const updatedCo: Company = {
+          ...co,
+          sector: data.sector || co.sector,
+          description: data.description || co.description,
+          size: data.size || co.size,
+          location: data.location || co.location,
+          foundingYear: data.foundingYear || co.foundingYear,
+          companyStatus: data.companyStatus || co.companyStatus,
+          parentGroup: data.parentGroup || co.parentGroup,
+          revenue: data.revenue || co.revenue,
+          metrics: cleanMetrics.length > 0 ? cleanMetrics : co.metrics,
+          enrichmentStatus: 'enriched',
+          lastEnrichedAt: new Date().toISOString()
+        };
+        dbStore.updateCompany(updatedCo);
       }
 
-      if (!data.description && !data.sector) {
+      if (!data.description && !data.sector && !data.revenue) {
         showToast("Aucune information supplémentaire trouvée en ligne pour cette entreprise.", "info");
         return;
       }
@@ -425,12 +419,12 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
       const currentDetails = selectedOpp.extractedInfo?.entrepriseDetails || {};
       const updatedDetails = {
         ...currentDetails,
-        presentation: currentDetails.presentation || data.description,
-        secteur: currentDetails.secteur && currentDetails.secteur !== "Secteur à préciser" ? currentDetails.secteur : data.sector,
-        taille: currentDetails.taille || data.size,
-        siege: currentDetails.siege || data.location,
-        parentGroup: currentDetails.parentGroup || data.parentGroup,
-        chiffresCles: currentDetails.chiffresCles && currentDetails.chiffresCles.length > 0 ? currentDetails.chiffresCles : (data.metrics || [])
+        presentation: data.description || currentDetails.presentation,
+        secteur: data.sector && data.sector !== "Secteur à préciser" ? data.sector : currentDetails.secteur,
+        taille: data.size || currentDetails.taille,
+        siege: data.location || currentDetails.siege,
+        parentGroup: data.parentGroup || currentDetails.parentGroup,
+        chiffresCles: cleanMetrics.length > 0 ? cleanMetrics : (currentDetails.chiffresCles || [])
       };
 
       const updatedOpp = {
@@ -898,14 +892,14 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
               <div className="flex items-center justify-between">
                 <label className="text-sm font-bold text-white flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-purple-400" />
-                  Remplissage magique par IA
+                  Extraction automatique de l'offre
                 </label>
                 {isExtracting && (
-                  <span className="text-xs text-purple-400 animate-pulse">Extraction...</span>
+                  <span className="text-xs text-purple-400 animate-pulse">Analyse...</span>
                 )}
               </div>
               <p className="text-xs text-slate-400">
-                Colle la description de l'offre ou les missions ci-dessous. Gemini va l'analyser et remplir automatiquement les informations clés !
+                Collez la description de l'offre ou les missions ci-dessous pour pré-remplir automatiquement les informations clés du poste.
               </p>
               <textarea
                 value={rawJobText}
@@ -921,7 +915,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                 size="sm"
                 className="w-full"
               >
-                {isExtracting ? "Analyse en cours..." : "Analyser avec Gemini AI"}
+                {isExtracting ? "Analyse en cours..." : "Analyser et pré-remplir"}
               </GlassButton>
             </div>
 

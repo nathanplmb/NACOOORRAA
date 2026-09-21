@@ -1,6 +1,6 @@
 {
   "name": "NACORA",
-  "description": "Accélérateur de carrière intelligent avec IA intégrée pour la recherche d'emploi et de stage.",
+  "description": "Plateforme d'accompagnement de carrière, pilotage des candidatures et préparation aux recrutements.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

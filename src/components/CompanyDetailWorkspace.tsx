@@ -442,39 +442,52 @@ export const CompanyDetailWorkspace: React.FC<CompanyDetailWorkspaceProps> = ({
             </div>
 
             {/* Key Metrics Grid if available */}
-            {company.metrics && company.metrics.length > 0 && (
-              <div className="space-y-3">
-                <span className="text-xs font-bold text-[#34D399] uppercase tracking-wider flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-[#34D399]" />
-                  {language === "en" ? "Key Figures & Extracted Metrics" : "Chiffres Clés & Données Synthétiques"}
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-                  {company.metrics.map((metric, idx) => {
-                    const colorSchemes = [
-                      { text: "text-[#34D399]", bg: "bg-[rgba(18,183,106,0.08)]", border: "border-[rgba(18,183,106,0.25)]" },
-                      { text: "text-[#38BDF8]", bg: "bg-[rgba(56,189,248,0.08)]", border: "border-[rgba(56,189,248,0.25)]" },
-                      { text: "text-[#FF6685]", bg: "bg-[rgba(216,26,69,0.08)]", border: "border-[rgba(216,26,69,0.25)]" },
-                      { text: "text-[#C084FC]", bg: "bg-[rgba(192,132,252,0.08)]", border: "border-[rgba(192,132,252,0.25)]" },
-                    ];
-                    const scheme = colorSchemes[idx % colorSchemes.length];
+            {(() => {
+              const displayMetrics = (company.metrics || []).filter((m) => {
+                if (!m || !m.label || !m.value) return false;
+                const l = m.label.toLowerCase().trim();
+                const v = m.value.toLowerCase().trim();
+                if (l === "statut" && v === "actif") return false;
+                if (v === "actif" || v === "n/a" || v === "donnée synthétique" || v === "non précisé" || v === "non renseigné") return false;
+                return true;
+              });
 
-                    return (
-                      <div 
-                        key={idx} 
-                        className={`p-4 rounded-2xl backdrop-blur-xl ${scheme.bg} border ${scheme.border} transition-all duration-200 text-center flex flex-col justify-between group shadow-[0_4px_16px_rgba(0,0,0,0.2),inset_0_1px_1px_rgba(255,255,255,0.12)] hover:-translate-y-0.5`}
-                      >
-                        <div className={`text-xl font-black ${scheme.text} font-display transition-transform group-hover:scale-105`}>
-                          {metric.value}
+              if (displayMetrics.length === 0) return null;
+
+              return (
+                <div className="space-y-3">
+                  <span className="text-xs font-bold text-[#34D399] uppercase tracking-wider flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-[#34D399]" />
+                    {language === "en" ? "Key Figures & Indicators" : "Chiffres Clés & Indicateurs Clés"}
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                    {displayMetrics.map((metric, idx) => {
+                      const colorSchemes = [
+                        { text: "text-[#34D399]", bg: "bg-[rgba(18,183,106,0.08)]", border: "border-[rgba(18,183,106,0.25)]" },
+                        { text: "text-[#38BDF8]", bg: "bg-[rgba(56,189,248,0.08)]", border: "border-[rgba(56,189,248,0.25)]" },
+                        { text: "text-[#FF6685]", bg: "bg-[rgba(216,26,69,0.08)]", border: "border-[rgba(216,26,69,0.25)]" },
+                        { text: "text-[#C084FC]", bg: "bg-[rgba(192,132,252,0.08)]", border: "border-[rgba(192,132,252,0.25)]" },
+                      ];
+                      const scheme = colorSchemes[idx % colorSchemes.length];
+
+                      return (
+                        <div 
+                          key={idx} 
+                          className={`p-4 rounded-2xl backdrop-blur-xl ${scheme.bg} border ${scheme.border} transition-all duration-200 text-center flex flex-col justify-between group shadow-[0_4px_16px_rgba(0,0,0,0.2),inset_0_1px_1px_rgba(255,255,255,0.12)] hover:-translate-y-0.5`}
+                        >
+                          <div className={`text-xl font-black ${scheme.text} font-display transition-transform group-hover:scale-105`}>
+                            {metric.value}
+                          </div>
+                          <div className="text-[11px] text-[#9AA0B2] mt-1.5 font-medium leading-tight">
+                            {metric.label}
+                          </div>
                         </div>
-                        <div className="text-[11px] text-[#9AA0B2] mt-1.5 font-medium leading-tight">
-                          {metric.label}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Identity Structured Fields Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

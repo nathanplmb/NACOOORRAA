@@ -83,7 +83,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
   // Regenerate brief on-demand via Server API (or local fallback)
   const handleRegenerateBrief = async () => {
     setIsRegenerating(true);
-    showToast(language === "en" ? "Analyzing your data and generating AI Daily Brief..." : "Analyse de tes données et génération du Daily Brief IA...", "ai");
+    showToast(language === "en" ? "Analyzing your activity and updating your overview..." : "Actualisation de votre synthèse d'activité en cours...", "info");
 
     const payload = {
       profile,
@@ -107,7 +107,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
       if (data && data.summaryText && Array.isArray(data.actions)) {
         setBriefData(data);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        showToast(language === "en" ? "Your AI Daily Brief was successfully regenerated!" : "Ton Daily Brief IA a été régénéré avec succès !", "success");
+        showToast(language === "en" ? "Your daily overview has been successfully refreshed!" : "Votre synthèse a été mise à jour avec succès !", "success");
       } else {
         throw new Error("Invalid structure returned");
       }
@@ -116,7 +116,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
       const fallback = generateLocalDailyBrief(payload);
       setBriefData(fallback);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
-      showToast(language === "en" ? "Brief updated from your recent data." : "Brief mis à jour à partir de tes données récentes.", "info");
+      showToast(language === "en" ? "Summary updated from your recent data." : "Synthèse mise à jour à partir de vos données récentes.", "info");
     } finally {
       setIsRegenerating(false);
     }
@@ -323,7 +323,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
                   <button
                     onClick={() => {
                       setChallengeAnswered(true);
-                      showToast(language === "en" ? "🎉 Excellent! Your networking engagement has been verified by NACORA AI." : "🎉 Excellent ! Ton engagement réseau a été validé par NACORA AI.", "success");
+                      showToast(language === "en" ? "🎉 Great! Your networking engagement has been recorded." : "🎉 Parfait ! Votre prise de contact a été enregistrée.", "success");
                     }}
                     className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-emerald-500/20 border border-emerald-500/35 text-emerald-300 hover:bg-emerald-500/30 transition-all cursor-pointer"
                   >
@@ -335,7 +335,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
                       localStorage.setItem("nacora_initial_ai_prompt", language === "en" 
                         ? "I haven't reached out to my priority network contact this week. Can you help me prepare my hook and identify the best target?" 
                         : "Je n'ai pas encore réalisé mon contact réseau prioritaire cette semaine. Peux-tu m'aider à préparer mon accroche et identifier la meilleure cible ?");
-                      showToast(language === "en" ? "Redirecting to AI Network Strategist to craft your approach..." : "Redirection vers le Stratège Réseau IA pour préparer ton accroche...", "ai");
+                      showToast(language === "en" ? "Opening Networking Module to structure your approach..." : "Accès au module Réseau pour préparer votre prise de contact...", "info");
                       onNavigate("hub_ia", "networking");
                     }}
                     className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-white/[0.05] border border-white/[0.12] text-purple-200 hover:bg-white/[0.1] transition-all cursor-pointer flex items-center gap-1.5"

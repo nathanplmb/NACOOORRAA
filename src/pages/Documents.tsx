@@ -192,23 +192,23 @@ export const Documents: React.FC = () => {
       {/* Tab 1: Dossier & Indexation */}
       {activeTab === "dossier" && (
         <div className="space-y-5">
-          {/* AI Banner */}
+          {/* Documents Dossier Banner */}
           <div className="p-4 rounded-2xl bg-gradient-to-r from-[rgba(216,26,69,0.12)] via-white/[0.02] to-transparent border border-[rgba(216,26,69,0.2)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-[rgba(216,26,69,0.2)] text-[#FF6685] shrink-0">
-                <Bot className="w-5 h-5" />
+                <FileCheck className="w-5 h-5" />
               </div>
               <div className="text-xs">
-                <strong className="text-[#F5F6FA] block">Tous vos documents sont automatiquement synchronisés avec l'IA NACORA</strong>
+                <strong className="text-[#F5F6FA] block">Dossier de candidature & documents centralisés</strong>
                 <span className="text-[#9AA0B2]">
-                  Le Hub IA, le Daily Brief et les simulateurs d'entretien exploitent le contenu de ces fichiers pour personnaliser leurs réponses.
+                  Vos synthèses d'activité, fiches de suivi et simulations d'entretien s'appuient sur ces éléments pour des conseils sur mesure.
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-[10px] text-[#34D399] font-mono bg-[#34D399]/10 px-2.5 py-1 rounded-full border border-[#34D399]/30 flex items-center gap-1.5">
                 <CheckCircle2 className="w-3 h-3" />
-                {docs.length} document(s) indexé(s)
+                {docs.length} document(s) enregistré(s)
               </span>
             </div>
           </div>
