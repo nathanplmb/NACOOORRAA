@@ -3,17 +3,17 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDSuWsOTSmd8PUkIsN6-P-OAklI9raLWY8",
-  authDomain: "sturdy-turbine-17dgj.firebaseapp.com",
-  projectId: "sturdy-turbine-17dgj",
-  storageBucket: "sturdy-turbine-17dgj.firebasestorage.app",
-  messagingSenderId: "1073701319587",
-  appId: "1:1073701319587:web:024f693a0dfa73d1776016",
-  firestoreDatabaseId: "ai-studio-b2fd733f-7ae2-4600-af7a-5faf7bad6765"
+  apiKey: "AIzaSyB3L2bIibXwEYbuj66W-J5hjkNp6x4MOAk",
+  authDomain: "nacora-7c9d2.firebaseapp.com",
+  projectId: "nacora-7c9d2",
+  storageBucket: "nacora-7c9d2.firebasestorage.app",
+  messagingSenderId: "350691239439",
+  appId: "1:350691239439:web:2617d86342605a302da57a",
+  measurementId: "G-LHDBW2YD6G"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app);
