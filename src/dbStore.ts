@@ -215,8 +215,7 @@ class DBStore {
 
       if (snapshot.exists()) {
         const data = snapshot.data();
-        if (data.profile && Object.keys(data.profile).length > 0) {
-          // If Firestore has a more complete profile or data, use it
+        if (data.profile && Object.keys(data.profile).length > 0 && data.profile.profileCompletionScore > 0) {
           this.profile = { ...this.profile, ...data.profile };
         }
         if (data.opportunities && data.opportunities.length > 0) {
@@ -237,8 +236,12 @@ class DBStore {
         if (data.chatSessions && data.chatSessions.length > 0) {
           this.chatSessions = data.chatSessions;
         }
+        // If local had recovered data and cloud was incomplete, sync back to cloud
+        if (!this.isQuotaExceeded && (this.opportunities.length > 0 || this.contacts.length > 0 || (this.profile.experiences && this.profile.experiences.length > 0))) {
+          await this.syncToFirestore(userId);
+        }
       } else if (!this.isQuotaExceeded) {
-        // If not in cloud yet, persist current local data to cloud
+        // If not in cloud yet, persist current recovered local data to cloud
         await this.syncToFirestore(userId);
       }
 
@@ -291,35 +294,104 @@ class DBStore {
 
   private loadFromUserLocalStorage(userId: string) {
     try {
-      const p = localStorage.getItem(`nacora_${userId}_profile`);
-      if (p) this.profile = JSON.parse(p);
-      else this.profile = createDefaultProfile(userId);
+      let p = localStorage.getItem(`nacora_${userId}_profile`);
+      let o = localStorage.getItem(`nacora_${userId}_opportunities`);
+      let c = localStorage.getItem(`nacora_${userId}_contacts`);
+      let co = localStorage.getItem(`nacora_${userId}_companies`);
+      let cal = localStorage.getItem(`nacora_${userId}_calendar`);
+      let docu = localStorage.getItem(`nacora_${userId}_documents`);
+      let sess = localStorage.getItem(`nacora_${userId}_sessions`);
 
-      const o = localStorage.getItem(`nacora_${userId}_opportunities`);
-      if (o) this.opportunities = JSON.parse(o);
-      else this.opportunities = [];
+      // If this is a fresh user session without data, scan for previous data in localStorage
+      let hasDirectData = false;
+      try {
+        if (o && JSON.parse(o).length > 0) hasDirectData = true;
+        if (c && JSON.parse(c).length > 0) hasDirectData = true;
+      } catch (_) {}
 
-      const c = localStorage.getItem(`nacora_${userId}_contacts`);
-      if (c) this.contacts = JSON.parse(c);
-      else this.contacts = [];
+      if (!hasDirectData && typeof window !== "undefined") {
+        // Look for any existing stored items in localStorage from guest or previous user sessions
+        const keys = Object.keys(localStorage);
+        for (const key of keys) {
+          if (key !== `nacora_${userId}_opportunities` && key.startsWith("nacora_") && key.endsWith("_opportunities")) {
+            const rawOpps = localStorage.getItem(key);
+            if (rawOpps) {
+              try {
+                const parsed = JSON.parse(rawOpps);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  const prefix = key.replace("_opportunities", "");
+                  if (!o || JSON.parse(o).length === 0) o = rawOpps;
+                  if (!c || JSON.parse(c).length === 0) c = localStorage.getItem(`${prefix}_contacts`) || c;
+                  if (!co || JSON.parse(co).length === 0) co = localStorage.getItem(`${prefix}_companies`) || co;
+                  if (!cal || JSON.parse(cal).length === 0) cal = localStorage.getItem(`${prefix}_calendar`) || cal;
+                  if (!docu || JSON.parse(docu).length === 0) docu = localStorage.getItem(`${prefix}_documents`) || docu;
+                  if (!p) p = localStorage.getItem(`${prefix}_profile`) || p;
+                  if (!sess) sess = localStorage.getItem(`${prefix}_sessions`) || sess;
+                  break;
+                }
+              } catch (_) {}
+            }
+          }
+        }
+        
+        // Also check legacy keys without user prefix
+        if (!o) o = localStorage.getItem("nacora_opportunities");
+        if (!c) c = localStorage.getItem("nacora_contacts");
+        if (!co) co = localStorage.getItem("nacora_companies");
+        if (!cal) cal = localStorage.getItem("nacora_calendar");
+        if (!docu) docu = localStorage.getItem("nacora_documents");
+        if (!p) p = localStorage.getItem("nacora_profile");
+      }
 
-      const co = localStorage.getItem(`nacora_${userId}_companies`);
-      if (co) this.companies = JSON.parse(co);
-      else this.companies = [];
+      if (p) {
+        try {
+          const parsedProfile = JSON.parse(p);
+          this.profile = { ...createDefaultProfile(userId), ...parsedProfile, id: userId };
+        } catch {
+          this.profile = createDefaultProfile(userId);
+        }
+      } else {
+        this.profile = createDefaultProfile(userId);
+      }
 
-      const cal = localStorage.getItem(`nacora_${userId}_calendar`);
-      if (cal) this.calendarEvents = JSON.parse(cal);
-      else this.calendarEvents = [];
+      if (o) {
+        try { this.opportunities = JSON.parse(o); } catch { this.opportunities = []; }
+      } else {
+        this.opportunities = [];
+      }
 
-      const docu = localStorage.getItem(`nacora_${userId}_documents`);
-      if (docu) this.documents = JSON.parse(docu);
-      else this.documents = [];
+      if (c) {
+        try { this.contacts = JSON.parse(c); } catch { this.contacts = []; }
+      } else {
+        this.contacts = [];
+      }
 
-      const sess = localStorage.getItem(`nacora_${userId}_sessions`);
-      if (sess) this.chatSessions = JSON.parse(sess);
-      else this.chatSessions = INITIAL_SESSIONS;
+      if (co) {
+        try { this.companies = JSON.parse(co); } catch { this.companies = []; }
+      } else {
+        this.companies = [];
+      }
+
+      if (cal) {
+        try { this.calendarEvents = JSON.parse(cal); } catch { this.calendarEvents = []; }
+      } else {
+        this.calendarEvents = [];
+      }
+
+      if (docu) {
+        try { this.documents = JSON.parse(docu); } catch { this.documents = []; }
+      } else {
+        this.documents = [];
+      }
+
+      if (sess) {
+        try { this.chatSessions = JSON.parse(sess); } catch { this.chatSessions = INITIAL_SESSIONS; }
+      } else {
+        this.chatSessions = INITIAL_SESSIONS;
+      }
 
       this.recalculateCompanyCounters();
+      this.saveToUserLocalStorage(userId);
     } catch (e) {
       console.error("Error loading user local storage:", e);
     }
@@ -628,6 +700,44 @@ class DBStore {
     this.notify();
     if (this.currentUserId) {
       this.syncToFirestore(this.currentUserId);
+    }
+  }
+
+  // Import Full Backup
+  importFullBackup(data: any): boolean {
+    try {
+      if (!data || typeof data !== "object") return false;
+      if (data.profile && typeof data.profile === "object") {
+        this.profile = { ...this.profile, ...data.profile };
+      }
+      if (Array.isArray(data.opportunities)) {
+        this.opportunities = data.opportunities;
+      }
+      if (Array.isArray(data.contacts)) {
+        this.contacts = data.contacts;
+      }
+      if (Array.isArray(data.companies)) {
+        this.companies = data.companies;
+      }
+      if (Array.isArray(data.calendarEvents)) {
+        this.calendarEvents = data.calendarEvents;
+      }
+      if (Array.isArray(data.documents)) {
+        this.documents = data.documents;
+      }
+      if (Array.isArray(data.chatSessions)) {
+        this.chatSessions = data.chatSessions;
+      }
+      this.recalculateCompanyCounters();
+      this.notify();
+      if (this.currentUserId) {
+        this.saveToUserLocalStorage(this.currentUserId);
+        this.syncToFirestore(this.currentUserId);
+      }
+      return true;
+    } catch (e) {
+      console.error("Failed to import full backup:", e);
+      return false;
     }
   }
 }

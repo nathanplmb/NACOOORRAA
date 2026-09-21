@@ -8,6 +8,7 @@ import {
   Bell, 
   Monitor, 
   Download, 
+  Upload,
   Link2, 
   HelpCircle, 
   AlertTriangle, 
@@ -80,7 +81,9 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
         opportunities: dbStore.getOpportunities(),
         contacts: dbStore.getContacts(),
         companies: dbStore.getCompanies(),
-        calendarEvents: dbStore.getCalendarEvents()
+        calendarEvents: dbStore.getCalendarEvents(),
+        documents: dbStore.getDocuments(),
+        chatSessions: dbStore.getChatSessions()
       };
       const blob = new Blob([JSON.stringify(dataDump, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
@@ -90,7 +93,32 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
       a.click();
       URL.revokeObjectURL(url);
       showToast(language === "en" ? "Export downloaded successfully." : "Export des données téléchargé avec succès.", "success");
-    }, 1200);
+    }, 800);
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const parsed = JSON.parse(content);
+        const success = dbStore.importFullBackup(parsed);
+        if (success) {
+          showToast(language === "en" ? "Data successfully imported and synced to Firebase!" : "Données importées et synchronisées avec succès sur Firebase !", "success");
+        } else {
+          showToast(language === "en" ? "Invalid backup file format." : "Format de fichier de sauvegarde invalide.", "error");
+        }
+      } catch (err) {
+        console.error("Import error:", err);
+        showToast(language === "en" ? "Error reading JSON file." : "Erreur lors de la lecture du fichier JSON.", "error");
+      }
+    };
+    reader.readAsText(file);
+    // Reset file input value to allow re-uploading the same file if needed
+    e.target.value = "";
   };
 
   const handleDeleteAccount = () => {
@@ -158,6 +186,7 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
       dataExportDesc: "Conformément au RGPD, vous pouvez à tout moment exporter l'ensemble des données enregistrées dans votre espace NACORA.",
       includedData: "Données incluses dans l'export :",
       exportBtn: "Exporter mes données (JSON)",
+      importBtn: "Importer une sauvegarde (JSON)",
       connections: "Connexions & Intégrations",
       connectionsSub: "Services tiers liés à votre compte NACORA",
       support: "Support & Ressources",
@@ -229,6 +258,7 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
       dataExportDesc: "In accordance with GDPR, you can export all your NACORA workspace data at any time.",
       includedData: "Data included in export:",
       exportBtn: "Export my data (JSON)",
+      importBtn: "Import backup (JSON)",
       connections: "Connections & Integrations",
       connectionsSub: "Third-party services linked to your NACORA account",
       support: "Support & Resources",
@@ -608,7 +638,7 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
                 </div>
               </div>
 
-              <div>
+              <div className="flex flex-wrap items-center gap-3 pt-2">
                 <button
                   type="button"
                   onClick={handleExportData}
@@ -617,6 +647,17 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
                   <Download className="w-4 h-4" />
                   {t.exportBtn}
                 </button>
+
+                <label className="px-4.5 py-3 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-xs transition-all flex items-center gap-2 border border-white/15 cursor-pointer hover:-translate-y-0.5 shadow-sm">
+                  <Upload className="w-4 h-4 text-[#38BDF8]" />
+                  {t.importBtn}
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleImportFile}
+                    className="hidden"
+                  />
+                </label>
               </div>
             </div>
           </section>
