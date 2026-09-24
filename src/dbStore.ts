@@ -155,6 +155,9 @@ class DBStore {
   private listeners: Set<() => void> = new Set();
   private isQuotaExceeded: boolean = false;
   private lastSyncSuccess: boolean = true;
+  private cloudStatus: "connected" | "offline" | "error" | "quota_exceeded" = "connected";
+  private lastCloudSyncTime: string | null = null;
+  private lastCloudError: string | null = null;
 
   constructor() {
     this.loadFromLocalStorage();
@@ -171,7 +174,12 @@ class DBStore {
   getSyncStatus() {
     return {
       isQuotaExceeded: this.isQuotaExceeded,
-      lastSyncSuccess: this.lastSyncSuccess
+      lastSyncSuccess: this.lastSyncSuccess,
+      cloudStatus: this.cloudStatus,
+      lastCloudSyncTime: this.lastCloudSyncTime,
+      lastCloudError: this.lastCloudError,
+      hasUser: Boolean(this.currentUserId),
+      userId: this.currentUserId
     };
   }
 
@@ -209,42 +217,67 @@ class DBStore {
       this.profile.lastName = displayName.split(" ").slice(1).join(" ");
     }
 
+    const cleanEmail = (email || this.profile.email || "").trim().toLowerCase().replace(/[^a-zA-Z0-9_]/g, "_");
+
     // 2. Sync with Cloud Firestore
     try {
       const userRef = doc(db, "users", userId);
-      const snapshot = await getDoc(userRef);
+      let snapshot = await getDoc(userRef);
+
+      // If document by UID not found, check fallback by email document
+      if (!snapshot.exists() && cleanEmail) {
+        try {
+          const emailRef = doc(db, "users_by_email", cleanEmail);
+          const emailSnap = await getDoc(emailRef);
+          if (emailSnap.exists()) {
+            snapshot = emailSnap;
+          }
+        } catch (_) {}
+      }
 
       if (snapshot.exists()) {
         const data = snapshot.data();
-        if (data.profile && Object.keys(data.profile).length > 0 && data.profile.profileCompletionScore > 0) {
+        if (data.profile && typeof data.profile === "object" && Object.keys(data.profile).length > 0) {
           this.profile = { ...this.profile, ...data.profile };
+          const { score } = calculateProfileCompletion(this.profile);
+          this.profile.profileCompletionScore = score;
         }
-        if (data.opportunities && data.opportunities.length > 0) {
+        if (Array.isArray(data.opportunities) && data.opportunities.length > 0) {
           this.opportunities = data.opportunities;
         }
-        if (data.contacts && data.contacts.length > 0) {
+        if (Array.isArray(data.contacts) && data.contacts.length > 0) {
           this.contacts = data.contacts;
         }
         this.reconcileContactCategories();
-        if (data.companies && data.companies.length > 0) {
+        if (Array.isArray(data.companies) && data.companies.length > 0) {
           this.companies = data.companies;
         }
-        if (data.calendarEvents && data.calendarEvents.length > 0) {
+        if (Array.isArray(data.calendarEvents) && data.calendarEvents.length > 0) {
           this.calendarEvents = data.calendarEvents;
         }
-        if (data.documents && data.documents.length > 0) {
+        if (Array.isArray(data.documents) && data.documents.length > 0) {
           this.documents = data.documents;
         }
-        if (data.chatSessions && data.chatSessions.length > 0) {
+        if (Array.isArray(data.chatSessions) && data.chatSessions.length > 0) {
           this.chatSessions = data.chatSessions;
         }
-        // If local had recovered data and cloud was incomplete, sync back to cloud
+
+        this.cloudStatus = "connected";
+        this.lastCloudSyncTime = new Date().toISOString();
+        this.lastCloudError = null;
+        this.lastSyncSuccess = true;
+
+        // If local had data and cloud was empty/incomplete, ensure cloud has the latest
         if (!this.isQuotaExceeded && (this.opportunities.length > 0 || this.contacts.length > 0 || (this.profile.experiences && this.profile.experiences.length > 0))) {
           await this.syncToFirestore(userId);
         }
       } else if (!this.isQuotaExceeded) {
-        // If not in cloud yet, persist current recovered local data to cloud
-        await this.syncToFirestore(userId);
+        // First time cloud user with existing local data -> persist to cloud
+        this.cloudStatus = "connected";
+        this.lastCloudSyncTime = new Date().toISOString();
+        if (this.opportunities.length > 0 || this.contacts.length > 0 || (this.profile.experiences && this.profile.experiences.length > 0)) {
+          await this.syncToFirestore(userId);
+        }
       }
 
       this.recalculateCompanyCounters();
@@ -254,10 +287,15 @@ class DBStore {
       const errMsg = e?.message || String(e);
       if (errMsg.includes("resource-exhausted") || errMsg.includes("Quota limit exceeded") || errMsg.includes("quota")) {
         this.isQuotaExceeded = true;
+        this.cloudStatus = "quota_exceeded";
+        this.lastCloudError = "Quota journalier Firestore atteint. Sauvegarde locale active.";
         console.warn("Firestore daily quota reached. Switched to offline-first local storage mode.");
       } else {
+        this.cloudStatus = "error";
+        this.lastCloudError = errMsg;
         console.warn("Cloud sync offline mode, using local session data:", e);
       }
+      this.lastSyncSuccess = false;
       this.loadFromUserLocalStorage(userId);
       this.notifyListenersOnly();
     }
@@ -422,6 +460,8 @@ class DBStore {
     try {
       const userRef = doc(db, "users", userId);
       const rawPayload = {
+        userId,
+        email: this.profile.email || "",
         profile: this.profile,
         opportunities: this.opportunities,
         contacts: this.contacts,
@@ -433,14 +473,31 @@ class DBStore {
       };
       const cleanPayload = cleanForFirestore(JSON.parse(JSON.stringify(rawPayload)));
       await setDoc(userRef, cleanPayload, { merge: true });
+
+      const cleanEmail = (this.profile.email || "").trim().toLowerCase().replace(/[^a-zA-Z0-9_]/g, "_");
+      if (cleanEmail) {
+        try {
+          const emailRef = doc(db, "users_by_email", cleanEmail);
+          await setDoc(emailRef, cleanPayload, { merge: true });
+        } catch (_) {}
+      }
+
       this.lastSyncSuccess = true;
+      this.cloudStatus = "connected";
+      this.lastCloudSyncTime = new Date().toISOString();
+      this.lastCloudError = null;
     } catch (e: any) {
       const errMsg = e?.message || String(e);
       if (errMsg.includes("resource-exhausted") || errMsg.includes("Quota limit exceeded") || errMsg.includes("quota")) {
         this.isQuotaExceeded = true;
         this.lastSyncSuccess = false;
+        this.cloudStatus = "quota_exceeded";
+        this.lastCloudError = "Quota Firestore dépassé";
         console.warn("Firestore daily write quota reached for today. Local storage is safeguarding your data.");
       } else {
+        this.lastSyncSuccess = false;
+        this.cloudStatus = "error";
+        this.lastCloudError = errMsg;
         console.error("Error syncing to Firestore cloud:", e);
       }
     }
@@ -758,6 +815,38 @@ class DBStore {
     this.notify();
     if (this.currentUserId) {
       this.syncToFirestore(this.currentUserId);
+    }
+  }
+
+  // Export Full Backup
+  exportFullBackup(): string {
+    const backupData = {
+      version: "1.0",
+      app: "NACORA",
+      exportedAt: new Date().toISOString(),
+      userId: this.currentUserId || "local_user",
+      profile: this.profile,
+      opportunities: this.opportunities,
+      contacts: this.contacts,
+      companies: this.companies,
+      calendarEvents: this.calendarEvents,
+      documents: this.documents,
+      chatSessions: this.chatSessions
+    };
+    return JSON.stringify(backupData, null, 2);
+  }
+
+  // Force Cloud Sync to Firestore
+  async forceCloudSync(): Promise<{ success: boolean; message: string }> {
+    if (!this.currentUserId) {
+      return { success: false, message: "Aucun utilisateur actif identifié pour la synchronisation Cloud." };
+    }
+    try {
+      await this.syncToFirestore(this.currentUserId);
+      return { success: true, message: "Toutes vos données ont été synchronisées avec succès sur Firestore Cloud." };
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      return { success: false, message: `Erreur de synchronisation Cloud : ${msg}` };
     }
   }
 

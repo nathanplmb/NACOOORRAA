@@ -15,6 +15,7 @@ import { ProjectsSection } from "../components/profile/ProjectsSection";
 import { InterestsSection } from "../components/profile/InterestsSection";
 import { CVImportCard } from "../components/profile/CVImportCard";
 import { CVImportModal } from "../components/profile/CVImportModal";
+import { DataSyncBackupCard } from "../components/profile/DataSyncBackupCard";
 
 import { 
   User, 
@@ -29,7 +30,8 @@ import {
   CheckCircle2,
   ShieldCheck,
   Save,
-  Check
+  Check,
+  Database
 } from "lucide-react";
 
 export const Profile: React.FC = () => {
@@ -164,6 +166,13 @@ export const Profile: React.FC = () => {
         : `${profile.interests?.length || 0} centre${(profile.interests?.length || 0) > 1 ? 's' : ''} d'intérêt`,
       isCompleted: Boolean(sectionsStatus.interests),
     },
+    {
+      id: "sauvegardes",
+      label: language === "en" ? "Sync & Backups" : "Sauvegardes & Cloud",
+      icon: Database,
+      subtitle: language === "en" ? "Export, Import & Firestore sync" : "Export, Import & Sync Firestore",
+      isCompleted: true,
+    },
   ];
 
   const activeItem = navItems.find((item) => item.id === activeSection) || navItems[0];
@@ -177,6 +186,7 @@ export const Profile: React.FC = () => {
               profile={profile}
               onEditClick={() => setActiveSection("identite")}
             />
+            <DataSyncBackupCard onNotify={showToast} />
             <CVImportCard
               onOpenImportModal={() => setIsCVModalOpen(true)}
             />
@@ -246,12 +256,22 @@ export const Profile: React.FC = () => {
             <InterestsSection profile={profile} onSave={handleUpdateProfile} />
           </div>
         );
+      case "sauvegardes":
+        return (
+          <div className="animate-fadeIn">
+            <DataSyncBackupCard onNotify={showToast} />
+          </div>
+        );
       default:
         return (
           <div className="space-y-8 animate-fadeIn">
             <ProfileOverviewCard
               profile={profile}
               onEditClick={() => setActiveSection("identite")}
+            />
+            <DataSyncBackupCard onNotify={showToast} />
+            <CVImportCard
+              onOpenImportModal={() => setIsCVModalOpen(true)}
             />
             <ProfileCompletionCard
               profile={profile}

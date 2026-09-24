@@ -1,8 +1,19 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useLanguage } from "../context/LanguageContext";
+import { useAuth } from "../context/AuthContext";
 import { dbStore } from "../dbStore";
 import { CalendarEvent, Opportunity } from "../types";
 import { GlassButton, Modal } from "../components/Shared";
+import { GoogleWorkspaceBar } from "../components/calendar/GoogleWorkspaceBar";
+import { GoogleTasksWorkspace } from "../components/calendar/GoogleTasksWorkspace";
+import { DestructiveConfirmModal } from "../components/calendar/DestructiveConfirmModal";
+import { 
+  listGoogleCalendarEvents, 
+  createGoogleCalendarEvent, 
+  updateGoogleCalendarEvent, 
+  deleteGoogleCalendarEvent,
+  googleEventToCalendarEvent 
+} from "../services/googleCalendarService";
 import { 
   Clock, 
   Plus, 
@@ -16,10 +27,15 @@ import {
   Briefcase,
   Check,
   CalendarCheck,
-  ArrowRight
+  ArrowRight,
+  ExternalLink,
+  Calendar as CalendarIcon,
+  Sparkles,
+  Loader2,
+  CheckCircle2
 } from "lucide-react";
 
-type FilterType = "all" | "interview" | "deadline" | "follow_up" | "other";
+type FilterType = "all" | "interview" | "deadline" | "follow_up" | "google";
 
 const DAYS_OF_WEEK_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const DAYS_OF_WEEK_SHORT_FR = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -28,11 +44,18 @@ const DAYS_OF_WEEK_SHORT_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export const Calendar: React.FC = () => {
   const { language, t } = useLanguage();
+  const { accessToken } = useAuth();
+  
   const DAYS_OF_WEEK = language === "en" ? DAYS_OF_WEEK_EN : DAYS_OF_WEEK_FR;
   const DAYS_OF_WEEK_SHORT = language === "en" ? DAYS_OF_WEEK_SHORT_EN : DAYS_OF_WEEK_SHORT_FR;
 
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [activeTab, setActiveTab] = useState<"calendar" | "tasks">("calendar");
+  const [localEvents, setLocalEvents] = useState<CalendarEvent[]>([]);
+  const [googleEvents, setGoogleEvents] = useState<CalendarEvent[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const [notification, setNotification] = useState<string | null>(null);
   
   // Current calendar view date (defaults to today)
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
@@ -46,6 +69,10 @@ export const Calendar: React.FC = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
 
+  // Destructive deletion confirmation modal state
+  const [eventToDelete, setEventToDelete] = useState<CalendarEvent | null>(null);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+
   // Form State
   const [formId, setFormId] = useState<string>("");
   const [formTitle, setFormTitle] = useState("");
@@ -54,17 +81,82 @@ export const Calendar: React.FC = () => {
   const [formType, setFormType] = useState<CalendarEvent["type"]>("deadline");
   const [formOppId, setFormOppId] = useState("");
   const [formNotes, setFormNotes] = useState("");
+  const [formSyncGoogle, setFormSyncGoogle] = useState(true);
+  const [isSubmittingForm, setIsSubmittingForm] = useState(false);
+
+  // Notification helper
+  const showToast = (msg: string) => {
+    setNotification(msg);
+    setTimeout(() => {
+      setNotification((curr) => (curr === msg ? null : curr));
+    }, 4000);
+  };
 
   useEffect(() => {
-    setEvents(dbStore.getCalendarEvents());
+    setLocalEvents(dbStore.getCalendarEvents());
     setOpportunities(dbStore.getOpportunities());
     
     const unsub = dbStore.subscribe(() => {
-      setEvents(dbStore.getCalendarEvents());
+      setLocalEvents(dbStore.getCalendarEvents());
       setOpportunities(dbStore.getOpportunities());
     });
     return unsub;
   }, []);
+
+  // Sync Google Calendar Events
+  const fetchGoogleCalendar = useCallback(async () => {
+    if (!accessToken) {
+      setGoogleEvents([]);
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      // Fetch 3 months window around currentDate
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const timeMin = new Date(year, month - 1, 1).toISOString();
+      const timeMax = new Date(year, month + 2, 0).toISOString();
+
+      const rawGItems = await listGoogleCalendarEvents(accessToken, timeMin, timeMax);
+      const converted = rawGItems.map(googleEventToCalendarEvent);
+      setGoogleEvents(converted);
+      setLastSyncTime(new Date());
+    } catch (e: any) {
+      console.error("Error fetching Google Calendar events:", e);
+      showToast("Échec de la synchronisation avec Google Calendar.");
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [accessToken, currentDate]);
+
+  useEffect(() => {
+    if (accessToken) {
+      fetchGoogleCalendar();
+    } else {
+      setGoogleEvents([]);
+    }
+  }, [accessToken, fetchGoogleCalendar]);
+
+  const handleManualSync = async () => {
+    if (!accessToken) return;
+    await fetchGoogleCalendar();
+    showToast("Synchronisation avec Google Calendar réussie !");
+  };
+
+  // Merge Local and Google events, deduplicating if an event exists in both
+  const events = useMemo(() => {
+    const combined: CalendarEvent[] = [...localEvents];
+    const localGoogleIds = new Set(localEvents.filter(e => e.googleEventId).map(e => e.googleEventId));
+
+    googleEvents.forEach(gEvt => {
+      if (gEvt.googleEventId && !localGoogleIds.has(gEvt.googleEventId)) {
+        combined.push(gEvt);
+      }
+    });
+
+    return combined;
+  }, [localEvents, googleEvents]);
 
   // Format Helper YYYY-MM-DD
   const formatDateToIso = (d: Date) => {
@@ -169,7 +261,8 @@ export const Calendar: React.FC = () => {
   const eventsByDate = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
     events.forEach(evt => {
-      if (activeFilter !== "all" && evt.type !== activeFilter) return;
+      if (activeFilter === "google" && !evt.isGoogleEvent && !evt.googleEventId) return;
+      if (activeFilter !== "all" && activeFilter !== "google" && evt.type !== activeFilter) return;
       
       const list = map.get(evt.date) || [];
       list.push(evt);
@@ -230,6 +323,7 @@ export const Calendar: React.FC = () => {
     setFormType("deadline");
     setFormOppId("");
     setFormNotes("");
+    setFormSyncGoogle(Boolean(accessToken));
     setIsAddOpen(true);
   };
 
@@ -239,10 +333,11 @@ export const Calendar: React.FC = () => {
   };
 
   // Save new event
-  const handleSubmitAdd = (e: React.FormEvent) => {
+  const handleSubmitAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitle.trim() || !formDate) return;
 
+    setIsSubmittingForm(true);
     let oppTitle: string | undefined;
     let coName: string | undefined;
 
@@ -251,6 +346,33 @@ export const Calendar: React.FC = () => {
       if (matched) {
         oppTitle = matched.title;
         coName = matched.companyName;
+      }
+    }
+
+    let createdGoogleId: string | undefined = undefined;
+    let googleHtmlLink: string | undefined = undefined;
+
+    if (formSyncGoogle && accessToken) {
+      try {
+        const fullDesc = [
+          formNotes.trim(),
+          oppTitle ? `Opportunité : ${oppTitle}` : null,
+          coName ? `Entreprise : ${coName}` : null,
+          `Créé depuis NACORA`
+        ].filter(Boolean).join("\n\n");
+
+        const gCreated = await createGoogleCalendarEvent(accessToken, {
+          title: formTitle.trim(),
+          description: fullDesc,
+          date: formDate,
+          time: formTime.trim() || undefined,
+        });
+
+        createdGoogleId = gCreated.id;
+        googleHtmlLink = gCreated.htmlLink;
+      } catch (err) {
+        console.error("Failed to sync to Google Calendar:", err);
+        showToast("Événement enregistré localement (erreur lors de la synchronisation Google Calendar).");
       }
     }
 
@@ -263,10 +385,15 @@ export const Calendar: React.FC = () => {
       opportunityTitle: oppTitle,
       companyName: coName,
       notes: formNotes.trim(),
-      completed: false
+      completed: false,
+      googleEventId: createdGoogleId,
+      htmlLink: googleHtmlLink,
+      isGoogleEvent: Boolean(createdGoogleId)
     });
 
+    setIsSubmittingForm(false);
     setIsAddOpen(false);
+    showToast(createdGoogleId ? "Événement planifié et synchronisé avec Google Calendar !" : "Événement planifié avec succès.");
   };
 
   // Open event details
@@ -291,10 +418,11 @@ export const Calendar: React.FC = () => {
   };
 
   // Save edited event
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEvent || !formTitle.trim() || !formDate) return;
 
+    setIsSubmittingForm(true);
     let oppTitle = selectedEvent.opportunityTitle;
     let coName = selectedEvent.companyName;
 
@@ -306,6 +434,20 @@ export const Calendar: React.FC = () => {
       } else {
         oppTitle = undefined;
         coName = undefined;
+      }
+    }
+
+    // Update on Google Calendar if linked
+    if (selectedEvent.googleEventId && accessToken) {
+      try {
+        await updateGoogleCalendarEvent(accessToken, selectedEvent.googleEventId, {
+          title: formTitle.trim(),
+          description: formNotes.trim(),
+          date: formDate,
+          time: formTime.trim() || undefined,
+        });
+      } catch (err) {
+        console.error("Failed to update Google Calendar event:", err);
       }
     }
 
@@ -323,7 +465,9 @@ export const Calendar: React.FC = () => {
 
     dbStore.updateCalendarEvent(updated);
     setSelectedEvent(updated);
+    setIsSubmittingForm(false);
     setIsEditMode(false);
+    showToast("Événement mis à jour avec succès.");
   };
 
   // Toggle completed state
@@ -335,15 +479,45 @@ export const Calendar: React.FC = () => {
     }
   };
 
-  // Delete event
-  const handleDeleteEvent = (id: string) => {
-    dbStore.deleteCalendarEvent(id);
-    setIsDetailOpen(false);
-    setSelectedEvent(null);
+  // Request deletion (opens confirmation modal)
+  const handleRequestDelete = (evt: CalendarEvent) => {
+    setEventToDelete(evt);
+  };
+
+  // Execute confirmed deletion
+  const handleConfirmDeleteEvent = async () => {
+    if (!eventToDelete) return;
+    setIsDeletingEvent(true);
+
+    try {
+      if (eventToDelete.googleEventId && accessToken) {
+        await deleteGoogleCalendarEvent(accessToken, eventToDelete.googleEventId);
+      }
+      dbStore.deleteCalendarEvent(eventToDelete.id);
+      setIsDetailOpen(false);
+      setSelectedEvent(null);
+      setEventToDelete(null);
+      showToast("Événement supprimé avec succès.");
+      // Refresh Google Events list if it was a google event
+      if (accessToken) fetchGoogleCalendar();
+    } catch (err) {
+      console.error("Error deleting event:", err);
+      showToast("Erreur lors de la suppression de l'événement.");
+    } finally {
+      setIsDeletingEvent(false);
+    }
   };
 
   // Type styling helpers
-  const getTypeBadgeStyle = (type: CalendarEvent["type"]) => {
+  const getTypeBadgeStyle = (type: CalendarEvent["type"], isGoogle?: boolean) => {
+    if (isGoogle) {
+      return {
+        pill: "bg-[#38BDF8]/15 text-[#38BDF8] border-[#38BDF8]/30",
+        dot: "bg-[#38BDF8]",
+        label: "Google Calendar"
+      };
+    }
+
     switch (type) {
       case "interview":
         return {
@@ -376,350 +550,382 @@ export const Calendar: React.FC = () => {
   const totalCount = events.length;
   const interviewCount = events.filter(e => e.type === "interview").length;
   const deadlineCount = events.filter(e => e.type === "deadline").length;
-  const followUpCount = events.filter(e => e.type === "follow_up").length;
+  const googleCount = events.filter(e => e.isGoogleEvent || e.googleEventId).length;
 
   return (
-    <div className="relative z-10 w-full space-y-2.5 pb-6">
-      
-      {/* 1. Header Toolbar (Compact, Single-Row Responsive) */}
-      <div className="glass-panel px-3 py-2 sm:px-4 sm:py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-        
-        {/* Left: Month Selector & Navigation */}
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center bg-white/[0.04] border border-white/10 rounded-lg p-0.5 shrink-0">
-            <button
-              onClick={handlePrevMonth}
-              title={language === "en" ? "Previous month" : "Mois précédent"}
-              className="p-1 rounded text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10 transition-colors cursor-pointer"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={handleGoToday}
-              title={language === "en" ? "Go to current month" : "Aller au mois actuel"}
-              className="px-2 py-0.5 text-[11px] font-semibold text-[#F5F6FA] hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
-            >
-              {t.calendar.today}
-            </button>
-            <button
-              onClick={handleNextMonth}
-              title={language === "en" ? "Next month" : "Mois suivant"}
-              className="p-1 rounded text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10 transition-colors cursor-pointer"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#D81A45] shadow-[0_0_6px_rgba(216,26,69,0.8)] shrink-0 hidden sm:block"></div>
-            <h1 className="text-base sm:text-lg font-bold text-[#F5F6FA] font-display tracking-tight truncate">
-              {monthTitle}
-            </h1>
-          </div>
+    <div className="relative z-10 w-full space-y-3 pb-8">
+      {/* Toast Notification */}
+      {notification && (
+        <div className="fixed top-20 right-6 z-50 p-3 rounded-2xl bg-[#0B0F19]/95 border border-[#38BDF8]/40 text-white shadow-2xl flex items-center gap-2.5 animate-fadeIn text-xs">
+          <CheckCircle2 className="w-4 h-4 text-[#38BDF8] shrink-0" />
+          <span>{notification}</span>
         </div>
+      )}
 
-        {/* Right: Filters & Add Action */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-          <div className="flex items-center gap-1 bg-white/[0.03] border border-white/10 rounded-lg p-0.5 shrink-0">
-            <button
-              onClick={() => setActiveFilter("all")}
-              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                activeFilter === "all"
-                  ? "bg-white/15 text-[#F5F6FA] shadow-sm"
-                  : "text-[#9AA0B2] hover:text-[#F5F6FA]"
-              }`}
-            >
-              {t.calendar.allEvents} ({totalCount})
-            </button>
-            <button
-              onClick={() => setActiveFilter("deadline")}
-              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap ${
-                activeFilter === "deadline"
-                  ? "bg-[rgba(216,26,69,0.25)] text-[#FF6685] border border-[rgba(216,26,69,0.4)]"
-                  : "text-[#9AA0B2] hover:text-[#F5F6FA]"
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-[#D81A45]"></span>
-              {t.calendar.deadlines} ({deadlineCount})
-            </button>
-            <button
-              onClick={() => setActiveFilter("interview")}
-              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap ${
-                activeFilter === "interview"
-                  ? "bg-purple-950/60 text-[#C084FC] border border-purple-500/40"
-                  : "text-[#9AA0B2] hover:text-[#F5F6FA]"
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-[#C084FC]"></span>
-              {t.calendar.interviews} ({interviewCount})
-            </button>
-            <button
-              onClick={() => setActiveFilter("follow_up")}
-              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap ${
-                activeFilter === "follow_up"
-                  ? "bg-amber-950/60 text-[#FBBF24] border border-amber-500/40"
-                  : "text-[#9AA0B2] hover:text-[#F5F6FA]"
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-[#FBBF24]"></span>
-              {t.calendar.followUps} ({followUpCount})
-            </button>
-          </div>
+      {/* 1. Google Workspace Status & Tab Switcher Bar */}
+      <GoogleWorkspaceBar
+        activeTab={activeTab}
+        onChangeTab={setActiveTab}
+        onSync={handleManualSync}
+        isSyncing={isSyncing}
+        lastSyncTime={lastSyncTime}
+        eventsCount={events.length}
+      />
 
-          <GlassButton 
-            variant="primary" 
-            size="sm" 
-            onClick={handleOpenAdd} 
-            icon={<Plus className="w-3.5 h-3.5 text-white" />}
-          >
-            {t.calendar.addEvent}
-          </GlassButton>
-        </div>
-      </div>
-
-      {/* 2. Main Two-Column Structure: [ CALENDRIER MENSUEL (72%) ] [ À VENIR (28%) ] */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-stretch">
-        
-        {/* --- LEFT: CALENDRIER MENSUEL PRINCIPAL (≈ 72% Width) --- */}
-        <div className="lg:col-span-8 xl:col-span-9 glass-panel p-2 sm:p-2.5 flex flex-col justify-between shadow-xl">
-          
-          {/* Days of Week Header */}
-          <div className="grid grid-cols-7 gap-1 mb-1 text-center">
-            {DAYS_OF_WEEK.map((day, idx) => (
-              <div key={day} className="py-1 text-center select-none">
-                <span className="hidden sm:inline text-[11px] font-bold text-[#9AA0B2] uppercase tracking-wider font-display">
-                  {day}
-                </span>
-                <span className="sm:hidden text-[10px] font-bold text-[#9AA0B2] uppercase font-display">
-                  {DAYS_OF_WEEK_SHORT[idx]}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {/* Compact 7-Columns Days Grid */}
-          <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
-            {calendarCells.map((cell) => {
-              const dayEvents = eventsByDate.get(cell.dateStr) || [];
-
-              return (
-                <div
-                  key={cell.dateStr}
-                  onClick={() => handleOpenAddForDate(cell.dateStr)}
-                  className={`
-                    group min-h-[58px] sm:min-h-[66px] lg:min-h-[72px] p-1 sm:p-1.5 rounded-lg sm:rounded-xl border transition-all duration-150 cursor-pointer flex flex-col justify-between relative
-                    ${cell.isToday 
-                      ? "bg-[rgba(216,26,69,0.08)] border-[rgba(216,26,69,0.42)] shadow-[inset_0_0_12px_rgba(216,26,69,0.1)]" 
-                      : cell.isCurrentMonth
-                        ? "bg-white/[0.02] hover:bg-white/[0.05] border-white/10 hover:border-white/20"
-                        : "bg-white/[0.005] border-white/[0.03] opacity-35 hover:opacity-60"}
-                  `}
-                >
-                  {/* Cell Header: Day Number + Quick Add */}
-                  <div className="flex items-center justify-between mb-0.5 leading-none">
-                    <span
-                      className={`
-                        inline-flex items-center justify-center text-[11px] font-bold rounded-md transition-transform
-                        ${cell.isToday 
-                          ? "w-5 h-5 bg-gradient-to-tr from-[#D81A45] to-[#FF1A55] text-white shadow-[0_0_8px_rgba(216,26,69,0.55)]" 
-                          : cell.isCurrentMonth 
-                            ? "text-[#F5F6FA] w-4 h-4" 
-                            : "text-[#9AA0B2]/60 w-4 h-4"}
-                      `}
-                    >
-                      {cell.dayNumber}
-                    </span>
-
-                    {/* Quick Add icon visible on hover */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenAddForDate(cell.dateStr);
-                      }}
-                      title="Ajouter un événement"
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-[#9AA0B2] hover:text-white hover:bg-white/15 transition-all"
-                    >
-                      <Plus className="w-2.5 h-2.5" />
-                    </button>
-                  </div>
-
-                  {/* Events list inside cell (Compact) */}
-                  <div className="flex-1 space-y-0.5 overflow-y-auto no-scrollbar max-h-[40px] sm:max-h-[48px] lg:max-h-[52px]">
-                    {dayEvents.slice(0, 2).map((evt) => {
-                      const badgeStyle = getTypeBadgeStyle(evt.type);
-                      const isDone = evt.completed;
-
-                      return (
-                        <div
-                          key={evt.id}
-                          onClick={(e) => handleOpenEventDetail(evt, e)}
-                          title={`${evt.title}${evt.time ? ` à ${evt.time}` : ''}`}
-                          className={`
-                            px-1 py-0.5 rounded text-[9.5px] sm:text-[10px] font-semibold border flex items-center gap-1 transition-all truncate select-none cursor-pointer leading-tight
-                            ${badgeStyle.pill}
-                            ${isDone ? "opacity-45 line-through grayscale-[35%]" : "hover:scale-[1.01]"}
-                          `}
-                        >
-                          <span className={`w-1 h-1 rounded-full shrink-0 ${badgeStyle.dot}`}></span>
-                          {evt.time && (
-                            <span className="font-mono text-[8.5px] opacity-80 shrink-0">
-                              {evt.time}
-                            </span>
-                          )}
-                          <span className="truncate flex-1">{evt.title}</span>
-                        </div>
-                      );
-                    })}
-
-                    {/* If more than 2 events */}
-                    {dayEvents.length > 2 && (
-                      <div className="text-[8.5px] font-bold text-[#9AA0B2] px-0.5 leading-none">
-                        +{dayEvents.length - 2} autre{dayEvents.length - 2 > 1 ? "s" : ""}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* --- RIGHT: COLONNE "À VENIR" (≈ 28% Width) --- */}
-        <div className="lg:col-span-4 xl:col-span-3 glass-panel p-3 sm:p-3.5 flex flex-col justify-between min-h-[360px] lg:max-h-[530px] shadow-xl">
-          
-          {/* Header of "À venir" */}
-          <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-white/10 shrink-0">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-[#D81A45]">
-                <Clock className="w-3.5 h-3.5" />
-              </div>
-              <h2 className="text-xs sm:text-sm font-bold text-[#F5F6FA] font-display">
-                {t.calendar.upcoming}
-              </h2>
-            </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-[#9AA0B2] border border-white/10">
-              {upcomingEvents.length} {language === "en" ? (upcomingEvents.length > 1 ? "events" : "event") : (upcomingEvents.length > 1 ? "échéances" : "échéance")}
-            </span>
-          </div>
-
-          {/* Upcoming Events List */}
-          <div className="flex-1 overflow-y-auto no-scrollbar space-y-2 pr-0.5">
-            {upcomingEvents.length > 0 ? (
-              upcomingEvents.map((evt) => {
-                const badgeStyle = getTypeBadgeStyle(evt.type);
-                const isToday = evt.date === todayIso;
-
-                return (
-                  <div
-                    key={evt.id}
-                    onClick={(e) => handleOpenEventDetail(evt, e)}
-                    className={`
-                      p-2.5 rounded-xl border transition-all duration-200 cursor-pointer group flex items-start justify-between gap-2
-                      ${isToday 
-                        ? "bg-[rgba(216,26,69,0.06)] hover:bg-[rgba(216,26,69,0.1)] border-[rgba(216,26,69,0.3)] shadow-[0_0_12px_rgba(216,26,69,0.08)]" 
-                        : "bg-white/[0.025] hover:bg-white/[0.06] border-white/10 hover:border-white/20"}
-                    `}
-                  >
-                    <div className="space-y-1 min-w-0 flex-1">
-                      
-                      {/* Date & Type Tag */}
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded-md border ${
-                          isToday 
-                            ? "bg-[rgba(216,26,69,0.2)] text-[#FF6685] border-[rgba(216,26,69,0.4)]" 
-                            : "bg-white/5 text-[#9AA0B2] border-white/10"
-                        }`}>
-                          {formatEventDateLabel(evt.date)}
-                        </span>
-
-                        {evt.time && (
-                          <span className="text-[9.5px] font-mono text-[#9AA0B2] flex items-center gap-0.5">
-                            <Clock className="w-2.5 h-2.5 opacity-60" />
-                            {evt.time}
-                          </span>
-                        )}
-
-                        <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded-full border ${badgeStyle.pill}`}>
-                          {badgeStyle.label}
-                        </span>
-                      </div>
-
-                      {/* Event Title */}
-                      <h4 className="text-xs font-bold text-[#F5F6FA] group-hover:text-white transition-colors truncate">
-                        {evt.title}
-                      </h4>
-
-                      {/* Opportunity or Company */}
-                      {(evt.companyName || evt.opportunityTitle) && (
-                        <div className="flex items-center gap-1.5 text-[10px] text-[#9AA0B2] truncate pt-0.5">
-                          {evt.companyName && (
-                            <span className="flex items-center gap-1 text-[#F5F6FA]/80 truncate">
-                              <Building2 className="w-2.5 h-2.5 text-[#D81A45] shrink-0" />
-                              <span className="truncate">{evt.companyName}</span>
-                            </span>
-                          )}
-                          {evt.opportunityTitle && !evt.companyName && (
-                            <span className="flex items-center gap-1 text-[#9AA0B2] truncate">
-                              <Briefcase className="w-2.5 h-2.5 text-[#38BDF8] shrink-0" />
-                              <span className="truncate">{evt.opportunityTitle}</span>
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Quick Complete Checkbox */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleComplete(evt);
-                      }}
-                      title={evt.completed ? "Marquer non fait" : "Marquer comme fait"}
-                      className="p-1 rounded-lg text-[#9AA0B2] hover:text-[#34D399] hover:bg-white/10 transition-colors shrink-0 mt-0.5"
-                    >
-                      {evt.completed ? (
-                        <CheckSquare className="w-4 h-4 text-[#34D399]" />
-                      ) : (
-                        <Square className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-center p-4 space-y-2 my-auto">
-                <div className="w-10 h-10 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-center text-[#9AA0B2]">
-                  <CalendarCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-[#F5F6FA]">{language === "en" ? "No urgent deadlines" : "Aucune échéance urgente"}</p>
-                  <p className="text-[11px] text-[#9AA0B2]">{language === "en" ? "All your deadlines and follow-ups are up to date." : "Toutes vos dates limites et relances sont à jour."}</p>
-                </div>
+      {/* 2. TAB VIEW: GOOGLE TASKS WORKSPACE */}
+      {activeTab === "tasks" ? (
+        <GoogleTasksWorkspace
+          opportunities={opportunities}
+          onNotify={showToast}
+        />
+      ) : (
+        /* 3. TAB VIEW: CALENDAR & AGENDA */
+        <div className="space-y-2.5">
+          {/* Header Toolbar (Compact, Single-Row Responsive) */}
+          <div className="glass-panel px-3 py-2 sm:px-4 sm:py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            
+            {/* Left: Month Selector & Navigation */}
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center bg-white/[0.04] border border-white/10 rounded-lg p-0.5 shrink-0">
                 <button
-                  onClick={handleOpenAdd}
-                  className="mt-1 text-xs font-semibold text-[#D81A45] hover:text-[#FF6685] flex items-center gap-1 cursor-pointer transition-colors"
+                  onClick={handlePrevMonth}
+                  title={language === "en" ? "Previous month" : "Mois précédent"}
+                  className="p-1 rounded text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10 transition-colors cursor-pointer"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  {language === "en" ? "Schedule a milestone" : "Planifier un jalon"}
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={handleGoToday}
+                  title={language === "en" ? "Go to current month" : "Aller au mois actuel"}
+                  className="px-2 py-0.5 text-[11px] font-semibold text-[#F5F6FA] hover:text-white hover:bg-white/10 rounded transition-colors cursor-pointer"
+                >
+                  {t.calendar.today}
+                </button>
+                <button
+                  onClick={handleNextMonth}
+                  title={language === "en" ? "Next month" : "Mois suivant"}
+                  className="p-1 rounded text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10 transition-colors cursor-pointer"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
-            )}
+
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-1.5 h-1.5 rounded-full bg-[#D81A45] shadow-[0_0_6px_rgba(216,26,69,0.8)] shrink-0 hidden sm:block"></div>
+                <h1 className="text-base sm:text-lg font-bold text-[#F5F6FA] font-display tracking-tight truncate">
+                  {monthTitle}
+                </h1>
+              </div>
+            </div>
+
+            {/* Right: Filters & Add Action */}
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+              <div className="flex items-center gap-1 bg-white/[0.03] border border-white/10 rounded-lg p-0.5 shrink-0">
+                <button
+                  onClick={() => setActiveFilter("all")}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                    activeFilter === "all"
+                      ? "bg-white/15 text-[#F5F6FA] shadow-sm"
+                      : "text-[#9AA0B2] hover:text-[#F5F6FA]"
+                  }`}
+                >
+                  {t.calendar.allEvents} ({totalCount})
+                </button>
+                <button
+                  onClick={() => setActiveFilter("deadline")}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap ${
+                    activeFilter === "deadline"
+                      ? "bg-[rgba(216,26,69,0.25)] text-[#FF6685] border border-[rgba(216,26,69,0.4)]"
+                      : "text-[#9AA0B2] hover:text-[#F5F6FA]"
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#D81A45]"></span>
+                  {t.calendar.deadlines} ({deadlineCount})
+                </button>
+                <button
+                  onClick={() => setActiveFilter("interview")}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap ${
+                    activeFilter === "interview"
+                      ? "bg-purple-950/60 text-[#C084FC] border border-purple-500/40"
+                      : "text-[#9AA0B2] hover:text-[#F5F6FA]"
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#C084FC]"></span>
+                  {t.calendar.interviews} ({interviewCount})
+                </button>
+                {googleCount > 0 && (
+                  <button
+                    onClick={() => setActiveFilter("google")}
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 whitespace-nowrap ${
+                      activeFilter === "google"
+                        ? "bg-[#38BDF8]/20 text-[#38BDF8] border border-[#38BDF8]/40"
+                        : "text-[#9AA0B2] hover:text-[#F5F6FA]"
+                    }`}
+                  >
+                    <CalendarIcon className="w-3 h-3 text-[#38BDF8]" />
+                    <span>Google ({googleCount})</span>
+                  </button>
+                )}
+              </div>
+
+              <GlassButton
+                size="sm"
+                variant="primary"
+                onClick={handleOpenAdd}
+                icon={<Plus className="w-3.5 h-3.5" />}
+                className="whitespace-nowrap shrink-0"
+              >
+                {t.calendar.addEvent}
+              </GlassButton>
+            </div>
           </div>
 
-          {/* Quick Footer Action */}
-          <div className="pt-2.5 mt-2.5 border-t border-white/10 shrink-0">
-            <button
-              onClick={handleOpenAdd}
-              className="w-full py-2 px-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-xs font-semibold text-[#F5F6FA] flex items-center justify-center gap-1.5 transition-all cursor-pointer group"
-            >
-              <Plus className="w-3.5 h-3.5 text-[#D81A45] group-hover:scale-110 transition-transform" />
-              <span>{language === "en" ? "New milestone" : "Nouvelle échéance"}</span>
-            </button>
+          {/* Main 2-Column Split: Grid (Left) + Upcoming (Right) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-start">
+            
+            {/* --- LEFT: CALENDAR GRID (≈ 72% Width) --- */}
+            <div className="lg:col-span-8 xl:col-span-9 glass-panel p-2.5 sm:p-3 space-y-1.5 shadow-xl">
+              {/* Day Headers (Mon - Sun) */}
+              <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center mb-1">
+                {DAYS_OF_WEEK_SHORT.map((day, idx) => (
+                  <div 
+                    key={day} 
+                    className={`text-[10px] sm:text-[11px] font-bold uppercase tracking-wider py-1 rounded-md ${
+                      idx >= 5 ? "text-[#9AA0B2]/50" : "text-[#9AA0B2]"
+                    }`}
+                  >
+                    {day}
+                  </div>
+                ))}
+              </div>
+
+              {/* Compact 7-Columns Days Grid */}
+              <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
+                {calendarCells.map((cell) => {
+                  const dayEvents = eventsByDate.get(cell.dateStr) || [];
+
+                  return (
+                    <div
+                      key={cell.dateStr}
+                      onClick={() => handleOpenAddForDate(cell.dateStr)}
+                      className={`
+                        group min-h-[58px] sm:min-h-[66px] lg:min-h-[72px] p-1 sm:p-1.5 rounded-lg sm:rounded-xl border transition-all duration-150 cursor-pointer flex flex-col justify-between relative
+                        ${cell.isToday 
+                          ? "bg-[rgba(216,26,69,0.08)] border-[rgba(216,26,69,0.42)] shadow-[inset_0_0_12px_rgba(216,26,69,0.1)]" 
+                          : cell.isCurrentMonth
+                            ? "bg-white/[0.02] hover:bg-white/[0.05] border-white/10 hover:border-white/20"
+                            : "bg-white/[0.005] border-white/[0.03] opacity-35 hover:opacity-60"}
+                      `}
+                    >
+                      {/* Cell Header: Day Number + Quick Add */}
+                      <div className="flex items-center justify-between mb-0.5 leading-none">
+                        <span
+                          className={`
+                            inline-flex items-center justify-center text-[11px] font-bold rounded-md transition-transform
+                            ${cell.isToday 
+                              ? "w-5 h-5 bg-gradient-to-tr from-[#D81A45] to-[#FF1A55] text-white shadow-[0_0_8px_rgba(216,26,69,0.55)]" 
+                              : cell.isCurrentMonth 
+                                ? "text-[#F5F6FA] w-4 h-4" 
+                                : "text-[#9AA0B2]/60 w-4 h-4"}
+                          `}
+                        >
+                          {cell.dayNumber}
+                        </span>
+
+                        {/* Quick Add icon visible on hover */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenAddForDate(cell.dateStr);
+                          }}
+                          title="Ajouter un événement"
+                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-[#9AA0B2] hover:text-white hover:bg-white/15 transition-all"
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+
+                      {/* Events list inside cell (Compact) */}
+                      <div className="flex-1 space-y-0.5 overflow-y-auto no-scrollbar max-h-[40px] sm:max-h-[48px] lg:max-h-[52px]">
+                        {dayEvents.slice(0, 2).map((evt) => {
+                          const isG = Boolean(evt.isGoogleEvent || evt.googleEventId);
+                          const badgeStyle = getTypeBadgeStyle(evt.type, isG);
+                          const isDone = evt.completed;
+
+                          return (
+                            <div
+                              key={evt.id}
+                              onClick={(e) => handleOpenEventDetail(evt, e)}
+                              title={`${evt.title}${evt.time ? ` à ${evt.time}` : ''}`}
+                              className={`
+                                px-1 py-0.5 rounded text-[9.5px] sm:text-[10px] font-semibold border flex items-center gap-1 transition-all truncate select-none cursor-pointer leading-tight
+                                ${badgeStyle.pill}
+                                ${isDone ? "opacity-45 line-through grayscale-[35%]" : "hover:scale-[1.01]"}
+                              `}
+                            >
+                              <span className={`w-1 h-1 rounded-full shrink-0 ${badgeStyle.dot}`}></span>
+                              {evt.time && (
+                                <span className="font-mono text-[8.5px] opacity-80 shrink-0">
+                                  {evt.time}
+                                </span>
+                              )}
+                              <span className="truncate flex-1">{evt.title}</span>
+                            </div>
+                          );
+                        })}
+
+                        {/* If more than 2 events */}
+                        {dayEvents.length > 2 && (
+                          <div className="text-[8.5px] font-bold text-[#9AA0B2] px-0.5 leading-none">
+                            +{dayEvents.length - 2} autre{dayEvents.length - 2 > 1 ? "s" : ""}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* --- RIGHT: COLONNE "À VENIR" (≈ 28% Width) --- */}
+            <div className="lg:col-span-4 xl:col-span-3 glass-panel p-3 sm:p-3.5 flex flex-col justify-between min-h-[360px] lg:max-h-[530px] shadow-xl">
+              
+              {/* Header of "À venir" */}
+              <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-white/[0.04] border border-white/10 text-[#D81A45]">
+                    <Clock className="w-3.5 h-3.5" />
+                  </div>
+                  <h2 className="text-xs sm:text-sm font-bold text-[#F5F6FA] font-display">
+                    {t.calendar.upcoming}
+                  </h2>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-[#9AA0B2] border border-white/10">
+                  {upcomingEvents.length} {language === "en" ? (upcomingEvents.length > 1 ? "events" : "event") : (upcomingEvents.length > 1 ? "échéances" : "échéance")}
+                </span>
+              </div>
+
+              {/* Upcoming Events List */}
+              <div className="flex-1 overflow-y-auto no-scrollbar space-y-2 pr-0.5">
+                {upcomingEvents.length > 0 ? (
+                  upcomingEvents.map((evt) => {
+                    const isG = Boolean(evt.isGoogleEvent || evt.googleEventId);
+                    const badgeStyle = getTypeBadgeStyle(evt.type, isG);
+                    const isToday = evt.date === todayIso;
+
+                    return (
+                      <div
+                        key={evt.id}
+                        onClick={(e) => handleOpenEventDetail(evt, e)}
+                        className={`
+                          p-2.5 rounded-xl border transition-all duration-200 cursor-pointer group flex items-start justify-between gap-2
+                          ${isToday 
+                            ? "bg-[rgba(216,26,69,0.06)] hover:bg-[rgba(216,26,69,0.1)] border-[rgba(216,26,69,0.3)] shadow-[0_0_12px_rgba(216,26,69,0.08)]" 
+                            : "bg-white/[0.025] hover:bg-white/[0.06] border-white/10 hover:border-white/20"}
+                        `}
+                      >
+                        <div className="space-y-1 min-w-0 flex-1">
+                          
+                          {/* Date & Type Tag */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded-md border ${
+                              isToday 
+                                ? "bg-[rgba(216,26,69,0.2)] text-[#FF6685] border-[rgba(216,26,69,0.4)]" 
+                                : "bg-white/5 text-[#9AA0B2] border-white/10"
+                            }`}>
+                              {formatEventDateLabel(evt.date)}
+                            </span>
+
+                            {evt.time && (
+                              <span className="text-[9.5px] font-mono text-[#9AA0B2] flex items-center gap-0.5">
+                                <Clock className="w-2.5 h-2.5 opacity-60" />
+                                {evt.time}
+                              </span>
+                            )}
+
+                            <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded-full border ${badgeStyle.pill}`}>
+                              {badgeStyle.label}
+                            </span>
+                          </div>
+
+                          {/* Event Title */}
+                          <h4 className="text-xs font-bold text-[#F5F6FA] group-hover:text-white transition-colors truncate">
+                            {evt.title}
+                          </h4>
+
+                          {/* Opportunity or Company */}
+                          {(evt.companyName || evt.opportunityTitle) && (
+                            <div className="flex items-center gap-1.5 text-[10px] text-[#9AA0B2] truncate pt-0.5">
+                              {evt.companyName && (
+                                <span className="flex items-center gap-1 text-[#F5F6FA]/80 truncate">
+                                  <Building2 className="w-2.5 h-2.5 text-[#D81A45] shrink-0" />
+                                  <span className="truncate">{evt.companyName}</span>
+                                </span>
+                              )}
+                              {evt.opportunityTitle && !evt.companyName && (
+                                <span className="flex items-center gap-1 text-[#9AA0B2] truncate">
+                                  <Briefcase className="w-2.5 h-2.5 text-[#38BDF8] shrink-0" />
+                                  <span className="truncate">{evt.opportunityTitle}</span>
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Quick Complete Checkbox */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleComplete(evt);
+                          }}
+                          title={evt.completed ? "Marquer non fait" : "Marquer comme fait"}
+                          className="p-1 rounded-lg text-[#9AA0B2] hover:text-[#34D399] hover:bg-white/10 transition-colors shrink-0 mt-0.5"
+                        >
+                          {evt.completed ? (
+                            <CheckSquare className="w-4 h-4 text-[#34D399]" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-4 space-y-2 my-auto">
+                    <div className="w-10 h-10 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-center text-[#9AA0B2]">
+                      <CalendarCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-[#F5F6FA]">{language === "en" ? "No urgent deadlines" : "Aucune échéance urgente"}</p>
+                      <p className="text-[11px] text-[#9AA0B2]">{language === "en" ? "All your deadlines and follow-ups are up to date." : "Toutes vos dates limites et relances sont à jour."}</p>
+                    </div>
+                    <button
+                      onClick={handleOpenAdd}
+                      className="mt-1 text-xs font-semibold text-[#D81A45] hover:text-[#FF6685] flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      {language === "en" ? "Schedule a milestone" : "Planifier un jalon"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Quick Footer Action */}
+              <div className="pt-2.5 mt-2.5 border-t border-white/10 shrink-0">
+                <button
+                  onClick={handleOpenAdd}
+                  className="w-full py-2 px-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/10 text-xs font-semibold text-[#F5F6FA] flex items-center justify-center gap-1.5 transition-all cursor-pointer group"
+                >
+                  <Plus className="w-3.5 h-3.5 text-[#D81A45] group-hover:scale-110 transition-transform" />
+                  <span>{language === "en" ? "New milestone" : "Nouvelle échéance"}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* --- 3. MODAL : AJOUTER UN ÉVÉNEMENT --- */}
+      {/* --- 4. MODAL : AJOUTER UN ÉVÉNEMENT --- */}
       <Modal 
         isOpen={isAddOpen} 
         onClose={() => setIsAddOpen(false)} 
@@ -799,22 +1005,50 @@ export const Calendar: React.FC = () => {
               placeholder={language === "en" ? "Details, video link, questions to ask, documents to bring..." : "Précisions, lien visio, questions à poser, documents à apporter..."}
               value={formNotes}
               onChange={(e) => setFormNotes(e.target.value)}
-              className="w-full min-h-[80px] glass-input p-3 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+              className="w-full min-h-[70px] glass-input p-3 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
             />
           </div>
+
+          {/* Sync to Google Calendar option */}
+          {accessToken && (
+            <label className="flex items-center gap-2.5 p-3 rounded-xl bg-[#38BDF8]/10 border border-[#38BDF8]/20 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formSyncGoogle}
+                onChange={(e) => setFormSyncGoogle(e.target.checked)}
+                className="rounded accent-[#38BDF8] w-4 h-4"
+              />
+              <div className="text-xs">
+                <span className="font-bold text-white flex items-center gap-1.5">
+                  <CalendarIcon className="w-3.5 h-3.5 text-[#38BDF8]" />
+                  <span>Synchroniser également avec mon Google Calendar</span>
+                </span>
+                <span className="text-[10px] text-[#9AA0B2] block">
+                  L'événement sera ajouté directement à votre calendrier Google principal.
+                </span>
+              </div>
+            </label>
+          )}
 
           <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
             <GlassButton type="button" variant="ghost" onClick={() => setIsAddOpen(false)}>
               {language === "en" ? "Cancel" : "Annuler"}
             </GlassButton>
-            <GlassButton type="submit" variant="primary">
-              {language === "en" ? "Schedule event" : "Planifier l'événement"}
+            <GlassButton type="submit" variant="primary" disabled={isSubmittingForm}>
+              {isSubmittingForm ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Planification...</span>
+                </span>
+              ) : (
+                <span>{language === "en" ? "Schedule event" : "Planifier l'événement"}</span>
+              )}
             </GlassButton>
           </div>
         </form>
       </Modal>
 
-      {/* --- 4. MODAL : DÉTAIL & MODIFICATION D'UN ÉVÉNEMENT --- */}
+      {/* --- 5. MODAL : DÉTAIL & MODIFICATION D'UN ÉVÉNEMENT --- */}
       <Modal
         isOpen={isDetailOpen}
         onClose={() => {
@@ -831,14 +1065,27 @@ export const Calendar: React.FC = () => {
                 {/* Header info */}
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full border ${getTypeBadgeStyle(selectedEvent.type).pill}`}>
-                        {getTypeBadgeStyle(selectedEvent.type).label}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-full border ${getTypeBadgeStyle(selectedEvent.type, Boolean(selectedEvent.isGoogleEvent || selectedEvent.googleEventId)).pill}`}>
+                        {getTypeBadgeStyle(selectedEvent.type, Boolean(selectedEvent.isGoogleEvent || selectedEvent.googleEventId)).label}
                       </span>
+
                       {selectedEvent.completed && (
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#12B76A]/20 text-[#34D399] border border-[#12B76A]/40 flex items-center gap-1">
                           <Check className="w-3 h-3" /> {language === "en" ? "Completed" : "Terminé"}
                         </span>
+                      )}
+
+                      {(selectedEvent.htmlLink || selectedEvent.googleEventId) && (
+                        <a
+                          href={selectedEvent.htmlLink || "https://calendar.google.com"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-[#38BDF8]/10 text-[#38BDF8] border border-[#38BDF8]/30 flex items-center gap-1 hover:bg-[#38BDF8]/20 transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Google Calendar</span>
+                        </a>
                       )}
                     </div>
                     <h3 className={`text-base font-bold font-display ${selectedEvent.completed ? 'line-through text-[#9AA0B2]' : 'text-[#F5F6FA]'}`}>
@@ -907,7 +1154,7 @@ export const Calendar: React.FC = () => {
                 {/* Modal Footer Actions */}
                 <div className="flex items-center justify-between pt-4 border-t border-white/10">
                   <button
-                    onClick={() => handleDeleteEvent(selectedEvent.id)}
+                    onClick={() => handleRequestDelete(selectedEvent)}
                     className="p-2 rounded-xl text-[#F04438] hover:bg-[rgba(240,68,56,0.12)] transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-semibold"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1004,7 +1251,7 @@ export const Calendar: React.FC = () => {
                   <textarea
                     value={formNotes}
                     onChange={(e) => setFormNotes(e.target.value)}
-                    className="w-full min-h-[80px] glass-input p-3 text-xs text-[#F5F6FA]"
+                    className="w-full min-h-[70px] glass-input p-3 text-xs text-[#F5F6FA]"
                   />
                 </div>
 
@@ -1012,8 +1259,8 @@ export const Calendar: React.FC = () => {
                   <GlassButton type="button" variant="ghost" onClick={() => setIsEditMode(false)}>
                     {language === "en" ? "Cancel" : "Annuler"}
                   </GlassButton>
-                  <GlassButton type="submit" variant="primary">
-                    {language === "en" ? "Save changes" : "Enregistrer les modifications"}
+                  <GlassButton type="submit" variant="primary" disabled={isSubmittingForm}>
+                    {isSubmittingForm ? "Enregistrement..." : (language === "en" ? "Save changes" : "Enregistrer")}
                   </GlassButton>
                 </div>
               </form>
@@ -1021,6 +1268,24 @@ export const Calendar: React.FC = () => {
           </div>
         )}
       </Modal>
+
+      {/* Mandatory User Confirmation Modal for Destructive Event Deletion */}
+      <DestructiveConfirmModal
+        isOpen={Boolean(eventToDelete)}
+        title="Supprimer cet événement ?"
+        description={
+          eventToDelete?.googleEventId || eventToDelete?.isGoogleEvent
+            ? "Cet événement est synchronisé avec votre compte Google Calendar. La suppression le retirera définitivement de NACORA et de votre Google Calendar."
+            : "Êtes-vous sûr de vouloir supprimer cet événement de votre agenda ?"
+        }
+        itemName={eventToDelete?.title}
+        itemType="Événement"
+        confirmLabel="Confirmer la suppression"
+        cancelLabel="Annuler"
+        isProcessing={isDeletingEvent}
+        onConfirm={handleConfirmDeleteEvent}
+        onCancel={() => setEventToDelete(null)}
+      />
     </div>
   );
 };

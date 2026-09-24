@@ -1,12 +1,11 @@
 {
-  "projectId": "nacora-7c9d2",
-  "appId": "1:350691239439:web:2617d86342605a302da57a",
-  "apiKey": "AIzaSyB3L2bIibXwEYbuj66W-J5hjkNp6x4MOAk",
-  "authDomain": "nacora-7c9d2.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
-  "storageBucket": "nacora-7c9d2.firebasestorage.app",
-  "messagingSenderId": "350691239439",
-  "measurementId": "G-LHDBW2YD6G",
-  "oAuthClientId": "",
+  "projectId": "sturdy-turbine-17dgj",
+  "appId": "1:1073701319587:web:024f693a0dfa73d1776016",
+  "apiKey": "AIzaSyDSuWsOTSmd8PUkIsN6-P-OAklI9raLWY8",
+  "authDomain": "sturdy-turbine-17dgj.firebaseapp.com",
+  "storageBucket": "sturdy-turbine-17dgj.firebasestorage.app",
+  "messagingSenderId": "1073701319587",
+  "measurementId": "",
+  "oAuthClientId": "1073701319587-pcii7hs0ij1hcmq24dl1gufi0a5l3dhj.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

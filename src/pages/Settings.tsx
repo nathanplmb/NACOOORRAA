@@ -22,7 +22,11 @@ import {
   Key, 
   Laptop, 
   ExternalLink,
-  X
+  X,
+  Cloud,
+  RefreshCw,
+  Database,
+  CheckCircle2
 } from "lucide-react";
 
 interface SettingsProps {
@@ -53,6 +57,29 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
 
   // App preferences (Language real functionality)
   const { language, setLanguage } = useLanguage();
+
+  // Cloud Sync state
+  const [syncStatus, setSyncStatus] = useState(dbStore.getSyncStatus());
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = dbStore.subscribe(() => {
+      setSyncStatus(dbStore.getSyncStatus());
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    showToast(language === "en" ? "Synchronizing data with Cloud Firestore..." : "Synchronisation de vos données avec Firestore Cloud...", "info");
+    const result = await dbStore.forceCloudSync();
+    setIsSyncing(false);
+    if (result.success) {
+      showToast(language === "en" ? "Cloud synchronization completed successfully!" : "Synchronisation Cloud réussie !", "success");
+    } else {
+      showToast(result.message, "error");
+    }
+  };
 
   const handleLanguageChange = (lang: "fr" | "en") => {
     setLanguage(lang);
@@ -619,6 +646,66 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
               </div>
             </div>
 
+            {/* Cloud Sync Diagnostic & Status Card */}
+            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <Cloud className={`w-4 h-4 ${syncStatus.cloudStatus === "connected" ? "text-[#34D399]" : syncStatus.cloudStatus === "quota_exceeded" ? "text-[#FBBF24]" : "text-[#38BDF8]"}`} />
+                  <div>
+                    <h4 className="text-xs font-bold text-white">Synchronisation Cloud Firestore</h4>
+                    <p className="text-[10px] text-[#9AA0B2]">
+                      {syncStatus.cloudStatus === "connected" 
+                        ? "Connecté et synchronisé en temps réel sur Cloud Firestore"
+                        : syncStatus.cloudStatus === "quota_exceeded"
+                        ? "Mode local actif (quota journalier Firestore atteint)"
+                        : "Mode local actif"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1 ${
+                    syncStatus.cloudStatus === "connected"
+                      ? "bg-[#34D399]/10 border-[#34D399]/25 text-[#34D399]"
+                      : syncStatus.cloudStatus === "quota_exceeded"
+                      ? "bg-[#FBBF24]/10 border-[#FBBF24]/25 text-[#FBBF24]"
+                      : "bg-[#38BDF8]/10 border-[#38BDF8]/25 text-[#38BDF8]"
+                  }`}>
+                    <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                    {syncStatus.cloudStatus === "connected" ? "En direct" : "Actif"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleManualSync}
+                    disabled={isSyncing}
+                    className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white hover:text-[#38BDF8] transition-all cursor-pointer disabled:opacity-50"
+                    title="Forcer la synchronisation Cloud"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/5 text-[11px]">
+                <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+                  <span className="text-[#9AA0B2] block text-[10px]">Opportunités</span>
+                  <span className="font-bold text-white text-sm">{dbStore.getOpportunities().length}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+                  <span className="text-[#9AA0B2] block text-[10px]">Contacts & Réseau</span>
+                  <span className="font-bold text-white text-sm">{dbStore.getContacts().length}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+                  <span className="text-[#9AA0B2] block text-[10px]">Entreprises</span>
+                  <span className="font-bold text-white text-sm">{dbStore.getCompanies().length}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-white/[0.02] border border-white/5">
+                  <span className="text-[#9AA0B2] block text-[10px]">Complétude Profil</span>
+                  <span className="font-bold text-[#34D399] text-sm">{dbStore.getProfile().profileCompletionScore || 0}%</span>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-4">
               <p className="text-xs text-[#9AA0B2] leading-relaxed">
                 {t.dataExportDesc}
@@ -627,14 +714,14 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
               <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 text-xs space-y-2">
                 <p className="font-semibold text-white">{t.includedData}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-[#9AA0B2]">
-                  <span>• Profil candidat</span>
-                  <span>• Expériences</span>
-                  <span>• Formations</span>
-                  <span>• Compétences</span>
-                  <span>• Contacts</span>
-                  <span>• Opportunités</span>
-                  <span>• Candidatures</span>
-                  <span>• Préférences</span>
+                  <span>• Profil candidat complet</span>
+                  <span>• Expériences & Formations</span>
+                  <span>• Compétences & Outils</span>
+                  <span>• Contacts & Entreprises</span>
+                  <span>• Opportunités & Statuts</span>
+                  <span>• Candidatures & Relances</span>
+                  <span>• Événements Calendrier</span>
+                  <span>• Sessions IA & Documents</span>
                 </div>
               </div>
 

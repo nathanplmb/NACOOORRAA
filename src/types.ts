@@ -410,6 +410,33 @@ export interface CalendarEvent {
   notes: string;
   completed: boolean;
   createdAt: string;
+  googleEventId?: string;
+  isGoogleEvent?: boolean;
+  location?: string;
+  htmlLink?: string;
+}
+
+export interface GoogleTaskItem {
+  id: string;
+  title: string;
+  notes?: string;
+  due?: string; // RFC 3339 timestamp e.g. 2026-09-25T00:00:00.000Z
+  status: 'needsAction' | 'completed';
+  completed?: string;
+  deleted?: boolean;
+  hidden?: boolean;
+  parent?: string;
+  position?: string;
+  updated?: string;
+  selfLink?: string;
+  listId?: string;
+}
+
+export interface GoogleTaskList {
+  id: string;
+  title: string;
+  updated?: string;
+  selfLink?: string;
 }
 
 export interface DocumentFile {

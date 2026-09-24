@@ -14,18 +14,22 @@ import {
   Eye, 
   Bot, 
   CheckCircle2, 
-  Search,
-  Filter,
-  FileCheck,
-  Send,
-  Loader2
+  Search, 
+  Filter, 
+  FileCheck, 
+  Send, 
+  Loader2,
+  HardDrive,
+  Mail
 } from "lucide-react";
 import { CVStudio } from "../components/cv/CVStudio";
 import { MultiCVFusionModal } from "../components/profile/MultiCVFusionModal";
+import { GoogleDriveWorkspace } from "../components/workspace/GoogleDriveWorkspace";
+import { GmailWorkspace } from "../components/workspace/GmailWorkspace";
 
 export const Documents: React.FC = () => {
   const { language, t } = useLanguage();
-  const [activeTab, setActiveTab] = useState<"dossier" | "cv_studio">("dossier");
+  const [activeTab, setActiveTab] = useState<"dossier" | "cv_studio" | "drive_docs" | "gmail">("dossier");
   const [docs, setDocs] = useState<DocumentFile[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
@@ -163,7 +167,7 @@ export const Documents: React.FC = () => {
       </div>
 
       {/* Tabs Navigation */}
-      <div className="flex items-center gap-2 p-1.5 rounded-xl bg-white/[0.03] border border-white/10 w-fit">
+      <div className="flex flex-wrap items-center gap-2 p-1.5 rounded-xl bg-white/[0.03] border border-white/10 w-fit">
         <button
           onClick={() => setActiveTab("dossier")}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
@@ -186,6 +190,30 @@ export const Documents: React.FC = () => {
         >
           <Sparkles className="w-3.5 h-3.5" />
           <span>NACORA CV Studio (1-Page)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("drive_docs")}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === "drive_docs"
+              ? "bg-[#38BDF8]/20 text-[#38BDF8] border border-[#38BDF8]/30 shadow-sm"
+              : "text-[#9AA0B2] hover:text-[#F5F6FA]"
+          }`}
+        >
+          <HardDrive className="w-3.5 h-3.5" />
+          <span>Google Drive & Docs</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("gmail")}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            activeTab === "gmail"
+              ? "bg-[#EA4335]/20 text-[#FF6685] border border-[#EA4335]/30 shadow-sm"
+              : "text-[#9AA0B2] hover:text-[#F5F6FA]"
+          }`}
+        >
+          <Mail className="w-3.5 h-3.5" />
+          <span>Gmail Candidatures</span>
         </button>
       </div>
 
@@ -324,6 +352,16 @@ export const Documents: React.FC = () => {
       {/* Tab 2: CV Studio */}
       {activeTab === "cv_studio" && (
         <CVStudio onNotify={showToast} />
+      )}
+
+      {/* Tab 3: Google Drive & Google Docs */}
+      {activeTab === "drive_docs" && (
+        <GoogleDriveWorkspace onDocumentImported={(title) => showToast(`Document « ${title} » importé avec succès`, "ai")} />
+      )}
+
+      {/* Tab 4: Gmail Recruteurs */}
+      {activeTab === "gmail" && (
+        <GmailWorkspace />
       )}
 
       {/* Modal Import Document */}

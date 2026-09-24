@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useLanguage } from "../../context/LanguageContext";
+import { useAuth } from "../../context/AuthContext";
 import { dbStore } from "../../dbStore";
 import { CandidateProfile, DetailedExperience, DetailedEducation } from "../../types";
 import { GlassCard, GlassButton, Badge, Modal } from "../Shared";
@@ -24,13 +25,15 @@ import {
   Award, 
   Send, 
   Loader2,
-  Check
+  Check,
+  ExternalLink
 } from "lucide-react";
 import { 
   auditProfileAgainstFramework, 
   CVAuditResult, 
   OptimizedExperienceResult 
 } from "../../api/cvFramework";
+import { createGoogleDoc } from "../../services/googleDocsService";
 
 interface CVStudioProps {
   onNotify?: (msg: string, type: "success" | "error" | "info" | "ai") => void;
@@ -38,12 +41,14 @@ interface CVStudioProps {
 
 export const CVStudio: React.FC<CVStudioProps> = ({ onNotify }) => {
   const { language } = useLanguage();
+  const { accessToken } = useAuth();
   const [profile, setProfile] = useState<CandidateProfile>(dbStore.getProfile());
   const [audit, setAudit] = useState<CVAuditResult | null>(null);
   const [optimizingExpId, setOptimizingExpId] = useState<string | null>(null);
   const [optimizedDrafts, setOptimizedDrafts] = useState<Record<string, OptimizedExperienceResult>>({});
   const [answeringQuestions, setAnsweringQuestions] = useState<Record<string, Record<number, string>>>({});
   const [selectedTargetOffer, setSelectedTargetOffer] = useState<string>("");
+  const [isExportingGoogleDoc, setIsExportingGoogleDoc] = useState(false);
 
   useEffect(() => {
     const current = dbStore.getProfile();
@@ -175,6 +180,59 @@ export const CVStudio: React.FC<CVStudioProps> = ({ onNotify }) => {
     }
   };
 
+  const handleExportGoogleDoc = async () => {
+    if (!accessToken) {
+      if (onNotify) onNotify("Veuillez d'abord connecter votre compte Google Workspace.", "error");
+      return;
+    }
+
+    setIsExportingGoogleDoc(true);
+    try {
+      const targetRole = profile.targetTitles?.[0] || profile.title || "Profil";
+      const docTitle = `CV ${profile.fullName || "Candidat"} - ${targetRole}`;
+      
+      const docLines: string[] = [
+        `${profile.fullName?.toUpperCase() || "CV CANDIDAT"}`,
+        `${targetRole.toUpperCase()}`,
+        `${profile.email || ""} | ${profile.phone || ""} | ${profile.city || ""}`,
+        profile.linkedInUrl ? `LinkedIn : ${profile.linkedInUrl}` : "",
+        "\n--- SYNTHÈSE PROFESSIONNELLE ---",
+        profile.bio || profile.currentSituation || "",
+        "\n--- EXPÉRIENCES PROFESSIONNELLES ---",
+        ...(profile.experiences || []).map((exp: DetailedExperience) => {
+          const bullets = exp.responsibilities || exp.missions || exp.achievements || [exp.description];
+          const tools = exp.tools || exp.skills || [];
+          return (
+            `\n${exp.role.toUpperCase()} — ${exp.company} (${exp.period || exp.startDate || ""})\n` +
+            bullets.map((b: string) => `• ${b}`).join("\n") +
+            (tools.length > 0 ? `\nOutils & Compétences : ${tools.join(", ")}` : "")
+          );
+        }),
+        "\n--- FORMATION & DIPLÔMES ---",
+        ...(profile.educations || []).map((edu: DetailedEducation) =>
+          `• ${edu.degree} — ${edu.school || edu.institution || "Formation"} (${edu.period || edu.endDate || ""})`
+        ),
+        "\n--- COMPÉTENCES CLÉS ---",
+        (profile.hardSkills || []).map((h) => h.name).join(" • ")
+      ].filter(Boolean);
+
+      const res = await createGoogleDoc(accessToken, docTitle, docLines.join("\n"));
+      if (onNotify) {
+        onNotify(`Google Doc « ${docTitle} » généré avec succès !`, "success");
+      }
+      if (res.webViewLink) {
+        window.open(res.webViewLink, "_blank", "noopener,noreferrer");
+      }
+    } catch (e: any) {
+      console.error(e);
+      if (onNotify) {
+        onNotify(`Erreur export Google Docs : ${e.message}`, "error");
+      }
+    } finally {
+      setIsExportingGoogleDoc(false);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -198,7 +256,17 @@ export const CVStudio: React.FC<CVStudioProps> = ({ onNotify }) => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <GlassButton
+            variant="secondary"
+            size="sm"
+            disabled={isExportingGoogleDoc}
+            onClick={handleExportGoogleDoc}
+            icon={isExportingGoogleDoc ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5 text-[#38BDF8]" />}
+          >
+            {isExportingGoogleDoc ? "Export en cours..." : "Exporter vers Google Docs"}
+          </GlassButton>
+
           <GlassButton 
             variant="ghost" 
             size="sm" 

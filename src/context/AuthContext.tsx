@@ -8,6 +8,24 @@ import {
 import { auth } from "../firebase";
 import { dbStore } from "../dbStore";
 
+export const WORKSPACE_SCOPES = [
+  "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/tasks",
+  "https://www.googleapis.com/auth/drive.file",
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/documents",
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.compose",
+];
+
+// In-memory token cache (strictly not persisted in localStorage/sessionStorage as required)
+let cachedAccessToken: string | null = null;
+
+export const getCachedAccessToken = (): string | null => {
+  return cachedAccessToken;
+};
+
 export interface SimulatedUser {
   uid: string;
   email: string;
@@ -17,20 +35,31 @@ export interface SimulatedUser {
 
 interface AuthContextType {
   currentUser: SimulatedUser | null;
+  accessToken: string | null;
   loading: boolean;
   authError: string | null;
-  loginWithGoogle: () => Promise<void>;
+  loginWithGoogle: () => Promise<string | null>;
+  connectGoogleWorkspace: () => Promise<string | null>;
   loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+  hasGoogleWorkspaceAuth: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<SimulatedUser | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  const createGoogleProvider = () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    WORKSPACE_SCOPES.forEach((scope) => provider.addScope(scope));
+    return provider;
+  };
 
   const establishUserSession = async (uid: string, email: string, displayName: string, photoURL?: string) => {
     const user: SimulatedUser = {
@@ -66,6 +95,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           firebaseUser.displayName || "Utilisateur Google",
           firebaseUser.photoURL || undefined
         );
+      } else {
+        cachedAccessToken = null;
+        setAccessToken(null);
       }
       setLoading(false);
     }, (error) => {
@@ -80,19 +112,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAuthError(null);
   };
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = async (): Promise<string | null> => {
     clearError();
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
+      const provider = createGoogleProvider();
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken || null;
+      
+      if (token) {
+        cachedAccessToken = token;
+        setAccessToken(token);
+      }
+
       await establishUserSession(
         user.uid,
         user.email || "utilisateur@nacora.app",
         user.displayName || user.email?.split("@")[0] || "Utilisateur Google",
         user.photoURL || undefined
       );
+
+      return token;
     } catch (e: any) {
       console.error("Google Auth error:", e);
       const errorCode = e?.code || "";
@@ -115,9 +156,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const connectGoogleWorkspace = async (): Promise<string | null> => {
+    return loginWithGoogle();
+  };
+
   const loginAsGuest = async () => {
     clearError();
     const uid = "usr_guest_" + Math.random().toString(36).substring(2, 10);
+    cachedAccessToken = null;
+    setAccessToken(null);
     await establishUserSession(
       uid,
       "candidat.demo@nacora.app",
@@ -127,6 +174,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     clearError();
+    cachedAccessToken = null;
+    setAccessToken(null);
     localStorage.removeItem("nacora_active_session");
     dbStore.clearUser();
     try {
@@ -141,12 +190,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         currentUser,
+        accessToken,
         loading,
         authError,
         loginWithGoogle,
+        connectGoogleWorkspace,
         loginAsGuest,
         logout,
-        clearError
+        clearError,
+        hasGoogleWorkspaceAuth: Boolean(accessToken)
       }}
     >
       {children}
