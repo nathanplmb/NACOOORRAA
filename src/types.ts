@@ -258,18 +258,169 @@ export interface ProfessionalProfileDetails {
   isTargetSector?: boolean;
 }
 
-export type ContactNetworkingStatus = 'to_contact' | 'contacted' | 'exchanging' | 'interview_done' | 'not_interested';
+export type ContactNetworkingStatus = 
+  | 'a_contacter'
+  | 'demande_envoyee'
+  | 'connexion_acceptee'
+  | 'message_envoye'
+  | 'en_attente_reponse'
+  | 'reponse_recue'
+  | 'reponse_a_traiter'
+  | 'echange_en_cours'
+  | 'appel_prevu'
+  | 'echange_realise'
+  | 'opportunite_detectee'
+  | 'candidature_envoyee'
+  | 'relance_a_faire'
+  | 'en_attente'
+  | 'termine'
+  | 'sans_suite'
+  // Backwards compatibility
+  | 'to_contact' 
+  | 'contacted' 
+  | 'exchanging' 
+  | 'interview_done' 
+  | 'not_interested';
 
-export type NetworkingTone = 'tutoiement' | 'vouvoiement';
-export type NetworkingTemplateId = 'point_commun' | 'opportunite' | 'alumni_recommandation' | 'tres_personnalise';
-export type NetworkingFollowUpId = 'relance_1' | 'relance_2' | 'relance_3';
-export type NetworkingChannel = 'linkedin' | 'email' | 'linkedin_email';
-export type NetworkingGoal = 'stage' | 'alternance' | 'emploi' | 'networking_echange' | 'recrutement_equipe' | 'conseils_carriere';
+export type ConversationMessageSender = 'nathan' | 'contact' | 'system' | 'note';
+
+export interface ConversationMessage {
+  id: string;
+  sender: ConversationMessageSender;
+  text: string;
+  timestamp: string; // ISO string
+  channel?: 'linkedin' | 'email' | 'phone' | 'in_person';
+  subject?: string;
+  stage?: NetworkingContactStage;
+  status?: 'sent' | 'received' | 'draft';
+  importSource?: 'linkedin_csv' | 'email' | 'paste' | 'manual';
+  importedAt?: string;
+  confidenceScore?: number;
+}
+
+export interface ContactNextAction {
+  type: string; // e.g. "relance_1", "repondre", "appel", "recontacter"
+  label: string; // e.g. "Relance 1 à effectuer", "Répondre à sa proposition d'échange"
+  dueDate?: string; // YYYY-MM-DD
+  priority: 'urgent' | 'to_do' | 'upcoming' | 'pending';
+  completed?: boolean;
+}
+
+// Categories of Approach (5 Categories)
+export type NetworkingCategory = 
+  | 'connexion_premier_contact'
+  | 'networking_echange'
+  | 'opportunite'
+  | 'recommandation'
+  | 'tres_personnalise';
+
+// Subtypes tailored to each category
+export type NetworkingSubType =
+  // 1. Connexion / Premier contact
+  | 'point_commun'
+  | 'parcours_metier'
+  | 'entreprise_secteur'
+  // 2. Networking / Échange
+  | 'decouvrir_metier'
+  | 'comprendre_secteur'
+  | 'comprendre_entreprise'
+  | 'parcours_personnel'
+  // 3. Opportunité
+  | 'stage'
+  | 'alternance'
+  | 'premier_emploi_cdi'
+  | 'recrutement'
+  // 4. Recommandation / Mise en relation
+  | 'apres_echange_collaborateur'
+  | 'alumni_ecole'
+  | 'recommandation_interne'
+  | 'demande_orientation'
+  // 5. Très personnalisé
+  | 'actualite_projet'
+  | 'publication_linkedin'
+  | 'transaction_deal'
+  | 'parcours_remarquable'
+  | 'evenement_intervention';
+
+// Stages of Contact (6 Stages)
+export type NetworkingContactStage =
+  | 'demande_connexion'
+  | 'message_apres_acceptation'
+  | 'premier_message'
+  | 'relance_1'
+  | 'relance_2'
+  | 'relance_3';
+
+// Tone Options (Automatique, Tutoiement, Vouvoiement)
+export type NetworkingTone = 'automatique' | 'tutoiement' | 'vouvoiement';
+
+// Channels (LinkedIn, Email, Hybride)
+export type NetworkingChannel = 'linkedin' | 'email' | 'hybride' | 'linkedin_email';
+
+// Goals (12 Objectives)
+export type NetworkingGoal = 
+  | 'echange_10min'
+  | 'decouvrir_metier'
+  | 'comprendre_secteur'
+  | 'comprendre_entreprise'
+  | 'obtenir_conseils'
+  | 'obtenir_recommandation'
+  | 'identifier_contact'
+  | 'stage'
+  | 'alternance'
+  | 'premier_emploi'
+  | 'premier_emploi_cdi'
+  | 'emploi'
+  | 'recrutement_equipe'
+  | 'candidature_directe'
+  | 'networking_echange'
+  | 'conseils_carriere';
+
+// Backwards-compatibility aliases
+export type NetworkingTemplateId = string;
+export type NetworkingFollowUpId = string;
+
+export interface StrategicPreAnalysis {
+  whoIsNathan: string;
+  whoIsContact: string;
+  relationshipDetails: string;
+  hookIdentified: string;
+  strategyReasoning: string;
+  antiHallucinationGuards: string[];
+  fiftyPersonTestPassed: boolean;
+  qualityReasoning: string;
+}
+
+export interface GeneratedOutreachResult {
+  message: string;
+  subject?: string;
+  subjectStandard?: string;
+  subjectPersonalized?: string;
+  hybridEmail?: string;
+  hybridEmailSubject?: string;
+  analysis: StrategicPreAnalysis;
+  category: NetworkingCategory;
+  subType: NetworkingSubType;
+  stage: NetworkingContactStage;
+  goal: NetworkingGoal;
+  channel: NetworkingChannel;
+  toneApplied: 'tutoiement' | 'vouvoiement';
+  wordCount: number;
+  characterCount: number;
+  callToAction: string;
+  suggestedFollowUpDays: number;
+  suggestedFollowUpDate: string;
+  missingDataQuestions?: string[];
+  isCompliantLinkedinNote?: boolean;
+}
 
 export interface OutreachMessageLogItem {
   id: string;
   stage: number; // 0: initial, 1: relance 1, 2: relance 2, 3: relance 3
   templateId: string;
+  category?: NetworkingCategory;
+  subType?: NetworkingSubType;
+  contactStage?: NetworkingContactStage;
   channel: NetworkingChannel;
   tone: NetworkingTone;
   subject?: string;
@@ -279,7 +430,10 @@ export interface OutreachMessageLogItem {
 }
 
 export interface NetworkingOutreachStrategy {
-  recommendedTemplateId: NetworkingTemplateId;
+  recommendedCategory: NetworkingCategory;
+  recommendedSubType: NetworkingSubType;
+  recommendedStage: NetworkingContactStage;
+  recommendedTemplateId: string;
   recommendedTone: NetworkingTone;
   recommendedChannel: NetworkingChannel;
   toneReason: string;
@@ -315,6 +469,10 @@ export interface Contact {
   companyName: string;
   jobTitle: string;
   normalizedJobTitle: string; // Normalized by Gemini
+  function?: string; // Catégorie professionnelle normalisée (ex: "Direction / Management")
+  functionSource?: 'manual' | 'ai_classification' | 'rule_engine' | 'imported';
+  functionConfidence?: 'high' | 'medium' | 'low';
+  functionClassifiedAt?: string;
   category: ContactCategory; // Primary/legacy category for backwards compatibility
   relevanceScore: number; // 0 to 100
   connectionPoints: string[]; // e.g., ["Même établissement : IUT Clermont Auvergne"]
@@ -324,6 +482,11 @@ export interface Contact {
   linkedInUrl?: string;
   email?: string;
   phone?: string;
+  city?: string;
+  location?: string;
+  department?: string;
+  seniority?: string;
+  schools?: string[];
   contactUrl?: string; // Internet link or application portal URL when direct contact isn't available
   aiCustomMessage?: string; // Personalized outreach message generated by Gemini
   createdAt: string;
@@ -348,11 +511,17 @@ export interface Contact {
   outreachChannel?: NetworkingChannel;
   outreachTemplateId?: NetworkingTemplateId | string;
   outreachGoal?: NetworkingGoal | string;
+  outreachCategory?: NetworkingCategory;
+  outreachSubType?: NetworkingSubType;
+  outreachStage?: NetworkingContactStage;
+  lastAnalysis?: StrategicPreAnalysis;
   initialMessageSentDate?: string;
   lastOutreachDate?: string;
   nextFollowUpDate?: string;
   followUpStage?: number; // 0 = non contacté, 1 = initial envoyé, 2 = relance 1 envoyée, 3 = relance 2 envoyée, 4 = relance 3 envoyée
   outreachMessagesLog?: OutreachMessageLogItem[];
+  conversationMessages?: ConversationMessage[];
+  nextAction?: ContactNextAction;
 }
 
 export interface CompanyFieldMetadata {
@@ -364,6 +533,7 @@ export interface CompanyFieldMetadata {
 export interface Company {
   id: string;
   name: string;
+  domain?: string;
   logoUrl?: string;
   sector?: string;
   website?: string;
@@ -554,4 +724,277 @@ export interface StructuredCV {
   centresInteret: StructuredCVCentreInteret[];
   metadonnees: StructuredCVMetadata;
 }
+
+// ==========================================
+// B2B PROSPECTING ENGINE TYPES & INTERFACES
+// ==========================================
+
+export type ProspectProviderSource = "hunter" | "nacora" | "demo" | "custom" | "nacora_engine" | "sandbox";
+export type ProspectEmailStatus = "verified" | "risky" | "invalid" | "not_found" | "unverified";
+export type ProspectLeadStatus = "new" | "qualified" | "contacted" | "in_conversation" | "converted" | "rejected";
+export type ProspectSeniority = "junior" | "mid" | "senior" | "lead" | "manager" | "director" | "vp" | "c_level" | "founder";
+export type ProspectDepartment = "marketing" | "sales" | "engineering" | "hr" | "finance" | "executive" | "product" | "operations" | "legal" | "other";
+
+export interface ProspectCompanyLocation {
+  city?: string;
+  region?: string;
+  country?: string;
+  postalCode?: string;
+  street?: string;
+}
+
+export interface ProspectCompany {
+  id: string;
+  name: string;
+  domain: string;
+  logoUrl?: string;
+  description?: string;
+  industry?: string;
+  location?: ProspectCompanyLocation;
+  employeeCount?: string | number;
+  revenue?: string;
+  foundedYear?: number | string;
+  linkedinUrl?: string;
+  twitterUrl?: string;
+  website?: string;
+  technologies?: string[];
+  growthIndicator?: string;
+  emailPattern?: string; // e.g. "{first}.{last}@"
+  source: ProspectProviderSource;
+  rawMetadata?: Record<string, any>;
+  savedInNacora?: boolean;
+  nacoraCompanyId?: string;
+}
+
+export interface ProspectPersonSource {
+  domain: string;
+  uri: string;
+  title?: string;
+  extracted_on?: string;
+}
+
+export interface ProspectPerson {
+  id: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  jobTitle: string;
+  normalizedTitle?: string;
+  companyName: string;
+  companyDomain?: string;
+  department?: ProspectDepartment | string;
+  seniority?: ProspectSeniority | string;
+  email?: string;
+  emailFindingType?: "public_verified" | "pattern_probable" | "unknown" | "not_found";
+  emailSourceUrl?: string;
+  emailStatus: ProspectEmailStatus;
+  emailScore?: number; // 0 to 100
+  phone?: string;
+  phoneSourceUrl?: string;
+  linkedinUrl?: string;
+  twitterUrl?: string;
+  location?: string;
+  summary?: string;
+  verifiedDate?: string;
+  confidence?: number;
+  sources?: ProspectPersonSource[];
+  source: ProspectProviderSource;
+  isSavedLead?: boolean;
+  leadId?: string;
+  convertedContactId?: string;
+}
+
+export interface ProspectLead {
+  id: string;
+  personId?: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  jobTitle: string;
+  companyName: string;
+  companyDomain?: string;
+  department?: ProspectDepartment | string;
+  seniority?: ProspectSeniority | string;
+  email?: string;
+  emailStatus: ProspectEmailStatus;
+  emailScore?: number;
+  phone?: string;
+  linkedinUrl?: string;
+  location?: string;
+  status: ProspectLeadStatus;
+  listIds: string[];
+  tags: string[];
+  notes?: string;
+  source: ProspectProviderSource;
+  convertedContactId?: string;
+  convertedOpportunityId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProspectList {
+  id: string;
+  name: string;
+  description?: string;
+  color?: string; // hex color or tailwind
+  leadsCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProspectSearchFilters {
+  query?: string;
+  company?: string;
+  function?: string;
+  target_type?: "person" | "company" | "people" | "companies";
+  location?: string;
+  industry?: string;
+  country?: string;
+  city?: string;
+  companySize?: string;
+  jobTitle?: string;
+  department?: string;
+  seniority?: string;
+  domain?: string;
+  technology?: string;
+}
+
+export interface SavedSearch {
+  id: string;
+  title: string;
+  queryText: string;
+  type: "companies" | "people";
+  filters: ProspectSearchFilters;
+  resultsCount: number;
+  createdAt: string;
+  lastRunAt: string;
+}
+
+export interface ProspectActivityLog {
+  id: string;
+  type: "search" | "email_finder" | "email_verifier" | "company_enrich" | "lead_created" | "lead_converted" | "list_created";
+  title: string;
+  description: string;
+  provider: ProspectProviderSource | "gemini_parser";
+  status: "success" | "warning" | "error";
+  creditsUsed?: number;
+  timestamp: string;
+  metadata?: Record<string, any>;
+}
+
+export interface ProspectingSettings {
+  activeProvider: "nacora" | "hybrid" | "demo";
+  autoVerifyEmails: boolean;
+  remainingCredits?: number;
+  usedCredits?: number;
+  planName?: string;
+  emailAccount?: string;
+  lastCheckedAt?: string;
+}
+
+export interface CompanySearchParams {
+  query?: string;
+  industry?: string;
+  location?: string;
+  country?: string;
+  city?: string;
+  size?: string;
+  domain?: string;
+  technology?: string;
+  limit?: number;
+}
+
+export interface PeopleSearchParams {
+  query?: string;
+  companyDomain?: string;
+  companyName?: string;
+  jobTitle?: string;
+  department?: string;
+  seniority?: string;
+  limit?: number;
+}
+
+export interface EmailFinderParams {
+  domain: string;
+  firstName: string;
+  lastName: string;
+  company?: string;
+}
+
+export interface EmailFinderResult {
+  email?: string;
+  score?: number;
+  status: ProspectEmailStatus;
+  firstName?: string;
+  lastName?: string;
+  position?: string;
+  company?: string;
+  sources?: ProspectPersonSource[];
+  verificationDetails?: Record<string, any>;
+}
+
+export interface EmailVerifierResult {
+  email: string;
+  status: "verified" | "risky" | "invalid" | "not_found";
+  result: "deliverable" | "risky" | "undeliverable" | "unknown";
+  score: number;
+  regexp: boolean;
+  gibberish: boolean;
+  disposable: boolean;
+  webmail: boolean;
+  mxRecords: boolean;
+  smtpCheck: boolean;
+  catchAll: boolean;
+  sourcesCount?: number;
+}
+
+export interface QueryParseResult {
+  target: "companies" | "people";
+  searchQuery: string;
+  filters: ProspectSearchFilters;
+  explanation: string;
+  suggestedAction?: string;
+}
+
+// ============================================================================
+// SUIVI DE CONSOMMATION IA & GESTION DES TOKENS
+// ============================================================================
+
+export type AiFeatureCategory = 
+  | 'networking_messages'      // Génération de messages networking & approches
+  | 'conversation_analysis'     // Analyse & reconstruction de conversations
+  | 'contact_analysis'          // Analyse stratégique de contacts & persona
+  | 'ai_assistant'              // Assistant IA général & Copilote NACORA
+  | 'job_extraction'            // Extraction intelligente d'offres d'emploi
+  | 'cv_optimization'           // Optimisation & audit CV / Lettres de motivation
+  | 'email_classification'      // Filtrage & pertinence professionnelle email
+  | 'other';
+
+export interface AiUsageRecord {
+  id: string;
+  timestamp: string; // ISO String (ex: 2026-09-28T14:30:00.000Z)
+  feature: string; // ex: "Génération message LinkedIn", "Analyse conversation"
+  featureCategory: AiFeatureCategory;
+  model: string; // ex: "gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview"
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  isExact: boolean; // true si retourné directement par l'API Gemini (usageMetadata), false si estimation
+  costEstimatedEuro: number; // Coût calculé en Euros
+  status: 'success' | 'fallback_deterministic' | 'error' | 'quota_exhausted';
+  durationMs?: number;
+  requestId?: string;
+  contextSnippet?: string; // Résumé ou aperçu non sensible
+}
+
+export interface AiUsageSettings {
+  monthlyTokenLimit?: number | null; // null ou nombre si configurée
+  dailyTokenLimit?: number | null;
+  alertThresholds: number[]; // ex: [50, 75, 90, 100]
+  lastAlertSentPercentage?: number;
+  providerLimitSource?: string; // ex: "Google AI Studio / Gemini API"
+  customCostPerMillionInput?: number;
+  customCostPerMillionOutput?: number;
+}
+
 

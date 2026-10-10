@@ -1,4 +1,6 @@
 import { Contact, ContactCategory, ContactCategoryItem, NetworkingRelevanceItem, ProfessionalProfileDetails } from "../types";
+import { resolveContact, shouldFilterOutLinkedInParticipant } from "./contactResolver";
+import { classifyContactFunction, ContactFunctionSource, ContactFunctionConfidence } from "./contactTaxonomy";
 
 export interface ParsedLinkedInRawRow {
   id: string;
@@ -16,6 +18,10 @@ export interface ParsedLinkedInRawRow {
 export interface LinkedInContactCandidate extends ParsedLinkedInRawRow {
   normalizedJobTitle?: string;
   category?: ContactCategory;
+  function?: string;
+  functionSource?: ContactFunctionSource;
+  functionConfidence?: ContactFunctionConfidence;
+  functionClassifiedAt?: string;
   relevanceScore?: number;
   connectionPoints?: string[];
   academicPath?: string;
@@ -195,6 +201,14 @@ export function extractLinkedInContacts(csvContent: string): ParsedLinkedInRawRo
 
     const fullName = `${firstName} ${lastName}`.trim();
 
+    // Filter generic non-identifiable participants (e.g. "LinkedIn Member" without email/URL)
+    const { shouldFilter } = shouldFilterOutLinkedInParticipant({
+      fullName,
+      email,
+      linkedInUrl: url
+    });
+    if (shouldFilter) return;
+
     // Only include if at least name or company/position is somewhat present
     if (fullName.length > 0 || (company.length > 0 && position.length > 0)) {
       contacts.push({
@@ -238,35 +252,19 @@ export function detectDuplicates(
   return rawContacts.map(raw => {
     const normRawName = normalizeForComparison(raw.fullName);
     const normRawEmail = raw.email ? raw.email.trim().toLowerCase() : "";
-    const normRawUrl = raw.url ? raw.url.trim().toLowerCase() : "";
 
-    let match: Contact | undefined;
-    let matchReason: string | undefined;
+    // Use centralized 5-priority contact resolver
+    const resolution = resolveContact({
+      fullName: raw.fullName,
+      firstName: raw.firstName,
+      lastName: raw.lastName,
+      email: raw.email,
+      linkedInUrl: raw.url,
+      companyName: raw.company
+    }, existingContacts);
 
-    // 1. Check exact email match
-    if (normRawEmail) {
-      match = existingContacts.find(c => c.email && c.email.trim().toLowerCase() === normRawEmail);
-      if (match) matchReason = `Même adresse email (${match.email})`;
-    }
-
-    // 2. Check LinkedIn URL match
-    if (!match && normRawUrl) {
-      match = existingContacts.find(c => c.linkedInUrl && c.linkedInUrl.trim().toLowerCase() === normRawUrl);
-      if (match) matchReason = `Même profil LinkedIn`;
-    }
-
-    // 3. Check exact Full Name match
-    if (!match && normRawName.length > 2) {
-      match = existingContacts.find(c => normalizeForComparison(c.fullName) === normRawName);
-      if (match) matchReason = `Même nom complet (${match.fullName})`;
-    }
-
-    // 4. Check First Name + Last Name match
-    if (!match && raw.firstName && raw.lastName) {
-      const targetCombo = normalizeForComparison(`${raw.firstName}${raw.lastName}`);
-      match = existingContacts.find(c => normalizeForComparison(`${c.firstName}${c.lastName}`) === targetCombo);
-      if (match) matchReason = `Même prénom et nom (${match.fullName})`;
-    }
+    const match = resolution.matchedContact || undefined;
+    const matchReason = resolution.reason;
 
     // Check if duplicate in current batch
     const batchKey = normRawEmail || normRawName;
@@ -275,8 +273,15 @@ export function detectDuplicates(
 
     const isDuplicate = !!match || isDuplicateInBatch;
 
+    // Function classification
+    const funcClassification = classifyContactFunction(raw.position, raw.company);
+
     return {
       ...raw,
+      function: funcClassification.function,
+      functionSource: funcClassification.functionSource,
+      functionConfidence: funcClassification.functionConfidence,
+      functionClassifiedAt: funcClassification.functionClassifiedAt,
       isDuplicate,
       duplicateMatchReason: matchReason || (isDuplicateInBatch ? "Présent plusieurs fois dans le fichier importé" : undefined),
       existingContactId: match?.id,

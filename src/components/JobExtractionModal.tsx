@@ -613,14 +613,6 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
       showToast(`Opportunité "${formOffer.title}" enregistrée dans vos candidatures !`, "success");
     }
 
-    // Sync to Firestore for authenticated user
-    try {
-      await dbStore.syncToFirestore("nathan_profile");
-      console.log("[JobExtractionModal] Synced opportunity to Firestore");
-    } catch (e) {
-      console.warn("[JobExtractionModal] Firestore sync fallback:", e);
-    }
-
     if (onSuccess) onSuccess(savedOpp);
     handleClose();
   };

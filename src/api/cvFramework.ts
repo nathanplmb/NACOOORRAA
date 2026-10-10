@@ -14,6 +14,7 @@ import {
   StructuredCVLangue
 } from "../types.ts";
 import { CASCADE_MODELS } from "./gemini.ts";
+import { trackGeminiCall } from "../utils/aiTokenTracker.ts";
 
 /**
  * ============================================================================
@@ -384,6 +385,7 @@ FORMAT DE SORTIE JSON STRICT :
     const ai = getAi();
     for (const model of CASCADE_MODELS) {
       try {
+        const startTime = Date.now();
         const res = await ai.models.generateContent({
           model,
           contents: prompt,
@@ -392,6 +394,17 @@ FORMAT DE SORTIE JSON STRICT :
             temperature: 0.2
           }
         });
+
+        trackGeminiCall({
+          feature: "Optimisation de l'expérience CV",
+          featureCategory: "cv_optimization",
+          model,
+          promptText: prompt,
+          response: res,
+          durationMs: Date.now() - startTime,
+          contextSnippet: `Optimisation expérience "${role}" chez ${company}`
+        });
+
         if (res && res.text) {
           const parsed = JSON.parse(res.text.trim());
           return {

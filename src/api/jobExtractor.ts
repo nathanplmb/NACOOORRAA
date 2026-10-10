@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
+import { trackGeminiCall } from "../utils/aiTokenTracker.ts";
 
 // ============================================================================
 // 1. SCHÉMA DE DONNÉES STRICT (ZOD)
@@ -702,6 +703,7 @@ export async function extractJobOfferWithCascade(
     const modelName = modelCascade[i];
     try {
       logDiag(`[Extractor] Tentative d'appel du modèle : "${modelName}"...`);
+      const startTime = Date.now();
 
       const response = await ai.models.generateContent({
         model: modelName,
@@ -712,6 +714,16 @@ export async function extractJobOfferWithCascade(
           responseMimeType: "application/json",
           responseSchema: geminiJobOfferResponseSchema as any,
         }
+      });
+
+      trackGeminiCall({
+        feature: "Extraction intelligente d'offres",
+        featureCategory: "job_extraction",
+        model: modelName,
+        promptText: `${EXTRACTION_SYSTEM_PROMPT}\n${userPrompt}`,
+        response,
+        durationMs: Date.now() - startTime,
+        contextSnippet: "Extraction structurée et validation Zod de l'offre d'emploi"
       });
 
       const responseText = response.text;

@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { CandidateProfile, Contact, ContactCategory } from "../types";
 import { dbStore } from "../dbStore";
 import { computeStrategicInterests } from "../utils/strategicInterests";
+import { classifyContactFunction, FunctionClassificationResult, ContactFunctionSource, ContactFunctionConfidence, StandardContactFunction } from "../utils/contactTaxonomy";
+import { resolveCompany } from "../utils/companyResolver";
 import { GlassButton, Badge } from "./Shared";
 import { 
   Sparkles, 
@@ -30,6 +32,10 @@ interface ContactCandidate {
   jobTitle: string;
   companyName: string;
   category: ContactCategory;
+  function?: string;
+  functionSource?: ContactFunctionSource;
+  functionConfidence?: ContactFunctionConfidence;
+  functionClassifiedAt?: string;
   industry?: string;
   location?: string;
   linkedinUrl?: string;
@@ -134,14 +140,22 @@ export const ImportContactsTextModal: React.FC<ImportContactsTextModalProps> = (
         const isDup = Boolean(nameMatch || linkedinMatch);
         const reason = nameMatch ? `Nom identique (${nameMatch.fullName})` : linkedinMatch ? "URL LinkedIn identique" : undefined;
 
+        const companyName = c.companyName || c.company || "Entreprise";
+        const jobTitle = c.jobTitle || "Professionnel";
+        const classification = classifyContactFunction(jobTitle, companyName);
+
         return {
           id: `cand_${index}_${Math.random().toString(36).substring(2, 7)}`,
           firstName: c.firstName || "",
           lastName: c.lastName || "",
           fullName: c.fullName || "Contact",
-          jobTitle: c.jobTitle || "Professionnel",
-          companyName: c.companyName || c.company || "Entreprise",
+          jobTitle,
+          companyName,
           category: c.category || "other_pro",
+          function: classification.function,
+          functionSource: classification.functionSource,
+          functionConfidence: classification.functionConfidence,
+          functionClassifiedAt: classification.functionClassifiedAt,
           industry: c.industry || "",
           location: c.location || "",
           linkedinUrl: c.linkedinUrl || "",
@@ -169,24 +183,34 @@ export const ImportContactsTextModal: React.FC<ImportContactsTextModalProps> = (
         const localParsed = parseContactsLocally(pastedText);
         if (localParsed.length > 0) {
           const existingContacts = dbStore.getContacts();
-          const mapped: ContactCandidate[] = localParsed.map((c: any, index: number) => ({
-            id: `cand_${index}_${Math.random().toString(36).substring(2, 7)}`,
-            firstName: c.firstName || "",
-            lastName: c.lastName || "",
-            fullName: c.fullName || "Contact",
-            jobTitle: c.jobTitle || "Professionnel",
-            companyName: c.companyName || "Entreprise",
-            category: c.category || "other_pro",
-            linkedinUrl: c.linkedinUrl || "",
-            email: c.email || "",
-            contactUrl: c.contactUrl || "",
-            notes: c.notes || "Importé par texte",
-            relevanceScore: 65,
-            connectionPoints: ["Importé par texte"],
-            selected: true,
-            isDuplicate: false,
-            action: "import"
-          }));
+          const mapped: ContactCandidate[] = localParsed.map((c: any, index: number) => {
+            const companyName = c.companyName || "Entreprise";
+            const jobTitle = c.jobTitle || "Professionnel";
+            const classification = classifyContactFunction(jobTitle, companyName);
+
+            return {
+              id: `cand_${index}_${Math.random().toString(36).substring(2, 7)}`,
+              firstName: c.firstName || "",
+              lastName: c.lastName || "",
+              fullName: c.fullName || "Contact",
+              jobTitle,
+              companyName,
+              category: c.category || "other_pro",
+              function: classification.function,
+              functionSource: classification.functionSource,
+              functionConfidence: classification.functionConfidence,
+              functionClassifiedAt: classification.functionClassifiedAt,
+              linkedinUrl: c.linkedinUrl || "",
+              email: c.email || "",
+              contactUrl: c.contactUrl || "",
+              notes: c.notes || "Importé par texte",
+              relevanceScore: 65,
+              connectionPoints: ["Importé par texte"],
+              selected: true,
+              isDuplicate: false,
+              action: "import"
+            };
+          });
           setCandidates(mapped);
           setStep("preview");
           showToast(`${mapped.length} contacts détectés (mode local).`, "success");
@@ -232,13 +256,26 @@ export const ImportContactsTextModal: React.FC<ImportContactsTextModalProps> = (
       if (cand.action === "merge" && cand.isDuplicate) {
         const existing = existingContacts.find(e => e.fullName.toLowerCase() === cand.fullName.toLowerCase());
         if (existing) {
-          const comp = dbStore.getCompanyByNameOrCreate(cand.companyName || existing.companyName);
+          const { company: comp } = resolveCompany({ companyName: cand.companyName || existing.companyName });
+          const funcClassification: FunctionClassificationResult = cand.function 
+            ? { 
+                function: cand.function as StandardContactFunction, 
+                functionSource: cand.functionSource || "imported", 
+                functionConfidence: cand.functionConfidence || "high", 
+                functionClassifiedAt: cand.functionClassifiedAt || new Date().toISOString() 
+              }
+            : classifyContactFunction(cand.jobTitle || existing.jobTitle, comp.name);
+
           dbStore.updateContact({
             ...existing,
             companyId: comp.id,
             companyName: comp.name,
             jobTitle: cand.jobTitle || existing.jobTitle,
             normalizedJobTitle: cand.jobTitle || existing.normalizedJobTitle,
+            function: funcClassification.function,
+            functionSource: funcClassification.functionSource,
+            functionConfidence: funcClassification.functionConfidence,
+            functionClassifiedAt: funcClassification.functionClassifiedAt,
             linkedInUrl: cand.linkedinUrl || existing.linkedInUrl,
             email: cand.email || existing.email,
             phone: cand.phone || existing.phone,
@@ -251,7 +288,16 @@ export const ImportContactsTextModal: React.FC<ImportContactsTextModalProps> = (
       }
 
       // Add new contact (additive rule)
-      const comp = dbStore.getCompanyByNameOrCreate(cand.companyName || "Entreprise");
+      const { company: comp } = resolveCompany({ companyName: cand.companyName || "Entreprise" });
+      const funcClassification: FunctionClassificationResult = cand.function 
+        ? { 
+            function: cand.function as StandardContactFunction, 
+            functionSource: cand.functionSource || "imported", 
+            functionConfidence: cand.functionConfidence || "high", 
+            functionClassifiedAt: cand.functionClassifiedAt || new Date().toISOString() 
+          }
+        : classifyContactFunction(cand.jobTitle, comp.name);
+
       const strategic = computeStrategicInterests({
         fullName: cand.fullName,
         jobTitle: cand.jobTitle,
@@ -268,6 +314,10 @@ export const ImportContactsTextModal: React.FC<ImportContactsTextModalProps> = (
         companyName: comp.name,
         jobTitle: cand.jobTitle,
         normalizedJobTitle: cand.jobTitle,
+        function: funcClassification.function,
+        functionSource: funcClassification.functionSource,
+        functionConfidence: funcClassification.functionConfidence,
+        functionClassifiedAt: funcClassification.functionClassifiedAt,
         category: cand.category,
         relevanceScore: cand.relevanceScore || strategic.relevanceScore,
         networkingRelevance: strategic.networkingRelevance,
@@ -430,8 +480,18 @@ export const ImportContactsTextModal: React.FC<ImportContactsTextModalProps> = (
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-[#9AA0B2] mt-1">
-                            <span className="text-[#F5F6FA] font-medium">{cand.jobTitle}</span> chez <span className="text-[#F5F6FA] font-medium">{cand.companyName}</span>
+                          <p className="text-xs text-[#9AA0B2] mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[#F5F6FA] font-medium">{cand.jobTitle}</span>
+                            {cand.function && cand.function !== "Inconnue" && (
+                              <>
+                                <span aria-hidden="true" className="text-white/20">·</span>
+                                <span className="px-1.5 py-0.2 rounded bg-[rgba(192,132,252,0.12)] border border-[rgba(192,132,252,0.25)] text-[#C084FC] text-[10px] font-semibold uppercase tracking-wider">
+                                  {cand.function}
+                                </span>
+                              </>
+                            )}
+                            <span aria-hidden="true" className="text-white/20">·</span>
+                            <span>chez <span className="text-[#F5F6FA] font-medium">{cand.companyName}</span></span>
                           </p>
                           {(cand.email || cand.linkedinUrl || cand.location) && (
                             <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-[#9AA0B2]">

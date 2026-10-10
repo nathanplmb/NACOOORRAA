@@ -33,6 +33,8 @@ export interface Translations {
   nav: {
     home: string;
     opportunities: string;
+    messages: string;
+    prospecting: string;
     calendar: string;
     documents: string;
     contacts: string;
@@ -373,6 +375,8 @@ const translationsData: Record<Language, Translations> = {
     nav: {
       home: "Accueil",
       opportunities: "Opportunités",
+      messages: "Messages",
+      prospecting: "Prospection",
       calendar: "Calendrier",
       documents: "Documents",
       contacts: "Contacts",
@@ -711,6 +715,8 @@ const translationsData: Record<Language, Translations> = {
     nav: {
       home: "Home",
       opportunities: "Opportunities",
+      messages: "Messages",
+      prospecting: "Prospecting",
       calendar: "Calendar",
       documents: "Documents",
       contacts: "Contacts",
@@ -1030,14 +1036,19 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [language, setLanguageState] = useState<Language>(() => {
-    return (localStorage.getItem("nacora_lang") as Language) || "fr";
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      return (localStorage.getItem("nacora_lang") as Language) || "fr";
+    }
+    return "fr";
   });
 
   useEffect(() => {
     const handleStorage = () => {
-      const stored = localStorage.getItem("nacora_lang") as Language;
-      if (stored && (stored === "fr" || stored === "en")) {
-        setLanguageState(stored);
+      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+        const stored = localStorage.getItem("nacora_lang") as Language;
+        if (stored && (stored === "fr" || stored === "en")) {
+          setLanguageState(stored);
+        }
       }
     };
     window.addEventListener("nacora-lang-change", handleStorage);
@@ -1050,8 +1061,10 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const setLanguage = (lang: Language) => {
     setLanguageState(lang);
-    localStorage.setItem("nacora_lang", lang);
-    window.dispatchEvent(new Event("nacora-lang-change"));
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      localStorage.setItem("nacora_lang", lang);
+      window.dispatchEvent(new Event("nacora-lang-change"));
+    }
   };
 
   return (
@@ -1071,12 +1084,14 @@ export const useLanguage = (): LanguageContextType => {
   const ctx = useContext(LanguageContext);
   if (!ctx) {
     // Fallback if not wrapped in provider
-    const fallbackLang = (localStorage.getItem("nacora_lang") as Language) || "fr";
+    const fallbackLang = (typeof window !== "undefined" && typeof localStorage !== "undefined" ? (localStorage.getItem("nacora_lang") as Language) : null) || "fr";
     return {
       language: fallbackLang,
       setLanguage: (l: Language) => {
-        localStorage.setItem("nacora_lang", l);
-        window.dispatchEvent(new Event("nacora-lang-change"));
+        if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+          localStorage.setItem("nacora_lang", l);
+          window.dispatchEvent(new Event("nacora-lang-change"));
+        }
       },
       t: translationsData[fallbackLang]
     };

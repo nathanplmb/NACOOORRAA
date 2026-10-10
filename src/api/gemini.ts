@@ -8,7 +8,8 @@ import {
   ProfessionalProfileDetails, 
   Opportunity, 
   Contact, 
-  CalendarEvent 
+  CalendarEvent,
+  ConversationMessage 
 } from "../types.ts";
 import { computePrimaryCategory, isHumanResourcesRole } from "../utils/contactMerger.ts";
 import { CV_FRAMEWORK_SYSTEM_PROMPT } from "./cvFramework.ts";
@@ -17,6 +18,7 @@ import {
   recommendNetworkingStrategy,
   generateOutreachMessageWithFramework
 } from "./networkingFramework.ts";
+import { trackGeminiCall } from "../utils/aiTokenTracker.ts";
 
 // Lazy-initialize Gemini AI to prevent startup crashes if key is missing
 let aiClient: GoogleGenAI | null = null;
@@ -106,12 +108,23 @@ export async function extractJobDetails(jobDescription: string): Promise<Extract
 
     for (const model of CASCADE_MODELS) {
       try {
+        const startTime = Date.now();
         const response = await ai.models.generateContent({
           model,
           contents: prompt,
           config: {
             responseMimeType: "application/json",
           },
+        });
+
+        trackGeminiCall({
+          feature: "Extraction d'offres d'emploi",
+          featureCategory: "job_extraction",
+          model,
+          promptText: prompt,
+          response,
+          durationMs: Date.now() - startTime,
+          contextSnippet: "Extraction structurée des missions, compétences et critères ATS"
         });
 
         const text = response.text || "{}";
@@ -636,6 +649,7 @@ export async function analyzeLinkedInContacts(
 
   for (const modelName of CASCADE_MODELS) {
     try {
+      const startTime = Date.now();
       const response = await ai.models.generateContent({
         model: modelName,
         contents: prompt,
@@ -643,6 +657,16 @@ export async function analyzeLinkedInContacts(
           temperature: 0.1,
           responseMimeType: "application/json",
         },
+      });
+
+      trackGeminiCall({
+        feature: "Analyse et catégorisation de contacts",
+        featureCategory: "contact_analysis",
+        model: modelName,
+        promptText: prompt,
+        response,
+        durationMs: Date.now() - startTime,
+        contextSnippet: `Analyse stratégique de ${rawContacts.length} contact(s)`
       });
 
       const text = response.text || "[]";
@@ -1119,12 +1143,23 @@ Directives de réponse (STYLE CLAUDE & CONCISION MAXIMALE) :
 
     for (const model of CASCADE_MODELS) {
       try {
+        const startTime = Date.now();
         const response = await ai.models.generateContent({
           model,
           contents: geminiHistory,
           config: {
             systemInstruction: systemInstruction,
           }
+        });
+
+        trackGeminiCall({
+          feature: "Assistant IA & Copilote",
+          featureCategory: "ai_assistant",
+          model,
+          promptText: `${systemInstruction}\n${lastUserMsg}`,
+          response,
+          durationMs: Date.now() - startTime,
+          contextSnippet: `Session avec le persona "${personaId}" : "${lastUserMsg.slice(0, 60)}..."`
         });
 
         if (response && response.text) {
@@ -1281,12 +1316,23 @@ ${isMultiSource ? `Source 1 - CV :\n${cvText}\n\nSource 2 - LinkedIn :\n${linked
 
     for (const model of CASCADE_MODELS) {
       try {
+        const startTime = Date.now();
         const response = await ai.models.generateContent({
           model,
           contents: prompt,
           config: {
             responseMimeType: "application/json",
           },
+        });
+
+        trackGeminiCall({
+          feature: "Optimisation & Audit CV",
+          featureCategory: "cv_optimization",
+          model,
+          promptText: prompt,
+          response,
+          durationMs: Date.now() - startTime,
+          contextSnippet: "Extraction structurée et réconciliation CV / Profil"
         });
 
         const text = response.text || "{}";
@@ -1694,6 +1740,7 @@ Format JSON strict attendu :
     const ai = getAi();
     for (const model of CASCADE_MODELS) {
       try {
+        const startTime = Date.now();
         const response = await ai.models.generateContent({
           model,
           contents: prompt,
@@ -1701,6 +1748,16 @@ Format JSON strict attendu :
             responseMimeType: "application/json",
             temperature: 0.2
           }
+        });
+
+        trackGeminiCall({
+          feature: "Daily Brief & Synthèse IA",
+          featureCategory: "ai_assistant",
+          model,
+          promptText: prompt,
+          response,
+          durationMs: Date.now() - startTime,
+          contextSnippet: "Recommandations d'actions quotidiennes et priorités"
         });
 
         const text = response.text || "{}";
@@ -1799,6 +1856,7 @@ export async function parseContactsFromText(
     const ai = getAi();
     for (const model of CASCADE_MODELS) {
       try {
+        const startTime = Date.now();
         const response = await ai.models.generateContent({
           model,
           contents: prompt,
@@ -1806,6 +1864,16 @@ export async function parseContactsFromText(
             responseMimeType: "application/json",
             temperature: 0.1
           }
+        });
+
+        trackGeminiCall({
+          feature: "Import & Extraction Contacts",
+          featureCategory: "contact_analysis",
+          model,
+          promptText: prompt,
+          response,
+          durationMs: Date.now() - startTime,
+          contextSnippet: "Extraction et structuration de contacts"
         });
 
         if (response && response.text) {
@@ -2051,6 +2119,7 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
         // 1. Tentative avec Google Search Grounding (SANS responseMimeType incompatible)
         try {
           console.info(`[enrichCompanyWithWebSearch] Recherche Google en direct avec ${model} pour "${cleanName}"...`);
+          const startTime = Date.now();
           const searchResponse = await ai.models.generateContent({
             model,
             contents: prompt,
@@ -2058,6 +2127,16 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
               tools: [{ googleSearch: {} }],
               temperature: 0.1
             }
+          });
+
+          trackGeminiCall({
+            feature: "Enrichissement Entreprise (Google Search Grounding)",
+            featureCategory: "contact_analysis",
+            model,
+            promptText: prompt,
+            response: searchResponse,
+            durationMs: Date.now() - startTime,
+            contextSnippet: `Recherche web et enrichissement pour "${cleanName}"`
           });
 
           responseText = searchResponse?.text || "";
@@ -2080,6 +2159,7 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
           console.info(`[enrichCompanyWithWebSearch] Google Search grounding direct indisponible sur ${model}, essai en mode JSON direct.`);
           
           // 2. Fallback sans outil de recherche (connaissances internes directes du modèle)
+          const startTime = Date.now();
           const directResponse = await ai.models.generateContent({
             model,
             contents: prompt,
@@ -2088,6 +2168,17 @@ export async function enrichCompanyWithWebSearch(companyName: string): Promise<E
               temperature: 0.1
             }
           });
+
+          trackGeminiCall({
+            feature: "Enrichissement Entreprise (Mode Direct)",
+            featureCategory: "contact_analysis",
+            model,
+            promptText: prompt,
+            response: directResponse,
+            durationMs: Date.now() - startTime,
+            contextSnippet: `Enrichissement entreprise pour "${cleanName}"`
+          });
+
           responseText = directResponse?.text || "";
         }
 
@@ -2558,6 +2649,7 @@ Génère entre 2 et 3 piliers stratégiques très pertinents.
     const ai = getAi();
     for (const model of CASCADE_MODELS) {
       try {
+        const startTime = Date.now();
         const response = await ai.models.generateContent({
           model,
           contents: prompt,
@@ -2565,6 +2657,16 @@ Génère entre 2 et 3 piliers stratégiques très pertinents.
             responseMimeType: "application/json",
             temperature: 0.3
           }
+        });
+
+        trackGeminiCall({
+          feature: "Analyse stratégique de contact & networking",
+          featureCategory: "contact_analysis",
+          model,
+          promptText: prompt,
+          response,
+          durationMs: Date.now() - startTime,
+          contextSnippet: `Piliers stratégiques réseau pour ${contact.fullName || "Contact"}`
         });
 
         const text = response.text || "{}";
@@ -2588,6 +2690,298 @@ Génère entre 2 et 3 piliers stratégiques très pertinents.
   const { computeStrategicInterests } = await import("../utils/strategicInterests");
   return computeStrategicInterests(contact, profile);
 }
+
+/**
+ * Parses natural language search queries into structured B2B prospecting filters.
+ * STRICT: Gemini does NOT invent contacts, emails or phone numbers.
+ */
+export async function parseProspectingQuery(userQuery: string): Promise<any> {
+  const prompt = `
+Tu es un moteur sémantique B2B de haute précision pour NACORA.
+L'utilisateur a écrit une requête naturelle de recherche prospection B2B :
+"${userQuery}"
+
+CONSIGNE STRICTE ET ABSOLUE :
+- Tu ne dois JAMAIS inventer d'adresses emails, ni de faux numéros de téléphone, ni de fausses personnes.
+- Ton unique mission est de traduire cette requête en paramètres de recherche structurés (filtres).
+
+Retourne EXCLUSIVEMENT un objet JSON valide avec cette structure :
+{
+  "target": "companies" ou "people",
+  "searchQuery": "terme principal de recherche",
+  "filters": {
+    "industry": "secteur d'activité si mentionné (ex: FinTech, SaaS, Santé, Banque)",
+    "country": "pays si mentionné (ex: France, Royaume-Uni)",
+    "city": "ville si mentionnée (ex: Paris, Lyon)",
+    "companySize": "taille si mentionnée (ex: 50-500, 500+)",
+    "jobTitle": "titre ou fonction de poste si recherche de personnes (ex: Directeur Marketing, HR Manager, Head of Sales)",
+    "department": "département (marketing | sales | engineering | hr | finance | executive | product | operations | legal | other)",
+    "seniority": "niveau (junior | mid | senior | lead | manager | director | vp | c_level | founder)",
+    "domain": "nom de domaine si mentionné (ex: revolut.com, qonto.com)"
+  },
+  "explanation": "courte synthèse explicative en français de ce qui est recherché (1 phrase claire)",
+  "suggestedAction": "suggestion d'action concrète pour l'utilisateur"
+}
+`;
+
+  try {
+    const ai = getAi();
+    for (const model of CASCADE_MODELS) {
+      try {
+        const startTime = Date.now();
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            responseMimeType: "application/json",
+            temperature: 0.2
+          }
+        });
+
+        trackGeminiCall({
+          feature: "Moteur de recherche sémantique Prospection B2B",
+          featureCategory: "other",
+          model,
+          promptText: prompt,
+          response,
+          durationMs: Date.now() - startTime,
+          contextSnippet: `Traduction sémantique requête : "${userQuery.slice(0, 50)}"`
+        });
+
+        const text = response.text || "{}";
+        const json = JSON.parse(text);
+        if (json && json.target) {
+          return json;
+        }
+      } catch (err) {
+        console.warn(`[parseProspectingQuery] model ${model} failed:`, err);
+      }
+    }
+  } catch (e) {
+    console.warn("Gemini parseProspectingQuery failed:", e);
+  }
+
+  // Fallback to local parsing
+  const { parseProspectingQueryLocally } = await import("./prospectingEngine.ts");
+  return parseProspectingQueryLocally(userQuery);
+}
+
+/**
+ * Generates a realistic, highly contextual response for a contact conversation thread.
+ * Adheres strictly to the conversation history, detected tone, contact profile, and user instruction.
+ */
+export async function generateConversationReply(payload: {
+  contact: Contact;
+  profile: CandidateProfile;
+  messages: ConversationMessage[];
+  userInstruction?: string;
+  channel?: string;
+  refinementContext?: string;
+}): Promise<{ reply: string; detectedTone: 'tutoiement' | 'vouvoiement'; instructionHandled: boolean }> {
+  const { contact, profile, messages, userInstruction, channel = "linkedin", refinementContext } = payload;
+  const candidateName = profile.firstName || "Nathan";
+  const contactName = contact.fullName || contact.firstName || "Contact";
+  const contactFirstName = contact.firstName || contact.fullName.split(" ")[0] || "Bonjour";
+  const companyName = contact.companyName || "votre entreprise";
+  const jobTitle = contact.jobTitle || "professionnel";
+
+  // Analyze messages to detect tone & find latest message
+  const sortedMessages = [...(messages || [])].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+  const lastContactMsg = [...sortedMessages].reverse().find(m => m.sender === "contact");
+  const lastMsg = sortedMessages[sortedMessages.length - 1];
+
+  // Auto-detect tone from last contact messages
+  const textSample = [
+    lastContactMsg?.text || "",
+    sortedMessages.map(m => m.text).join(" "),
+    contact.outreachTone || ""
+  ].join(" ").toLowerCase();
+
+  const isTutoiement: boolean = Boolean(
+    (
+      textSample.includes("salut") || 
+      textSample.includes("hello") || 
+      textSample.includes(" tu ") || 
+      textSample.includes("ton ") || 
+      textSample.includes("ta ") || 
+      textSample.includes("tes ") || 
+      textSample.includes("toi") ||
+      contact.outreachTone === "tutoiement" ||
+      Boolean(userInstruction && /tutoi|tutoie/i.test(userInstruction))
+    ) && !Boolean(userInstruction && /vouvoi|vouvoie/i.test(userInstruction))
+  );
+
+  const detectedTone: 'tutoiement' | 'vouvoiement' = isTutoiement ? 'tutoiement' : 'vouvoiement';
+
+  // Build the rich context prompt for Gemini
+  const prompt = `
+VOUS ÊTES L'ASSISTANT DE CONVERSATION INTELLIGENT DE NACORA.
+Votre rôle est de rédiger la réponse parfaite pour ${candidateName} dans sa conversation avec ${contactName}.
+
+========================================
+1. CONTEXTE DU CONTACT
+========================================
+- Nom : ${contactName} (Prénom : ${contactFirstName})
+- Poste : ${jobTitle} chez ${companyName}
+- Statut CRM : ${contact.networkingStatus || "Échange en cours"}
+- Canal : ${channel === "email" ? "Email" : "LinkedIn"}
+- Notes du contact : ${contact.notes || "Aucune note spécifique"}
+- Points d'intérêt / accroches : ${(contact.connectionPoints || []).join(", ") || "Échange professionnel direct"}
+
+========================================
+2. PROFIL DE L'UTILISATEUR (${candidateName.toUpperCase()})
+========================================
+- Titre / Cible : ${profile.title || (profile.targetTitles && profile.targetTitles[0]) || "Étudiant / Professionnel en Banque & Finance"}
+- Pitch / Objectif : ${profile.bio || "Créer un lien de confiance et explorer des opportunités d'échange constructif"}
+- Formation / Situation : ${profile.currentSituation || ""}
+
+========================================
+3. HISTORIQUE DE LA CONVERSATION (Ordre chronologique)
+========================================
+${sortedMessages.length > 0 
+  ? sortedMessages.map(m => {
+      const author = m.sender === "nathan" ? candidateName : (m.sender === "contact" ? contactName : "Système");
+      return `[${author} - ${m.timestamp ? m.timestamp.slice(0, 16).replace("T", " ") : "récent"}] :\n"${m.text}"`;
+    }).join("\n\n")
+  : `(Aucun message préalable. Il s'agit du premier message de prise de contact.)`
+}
+
+========================================
+4. INSTRUCTION DE L'UTILISATEUR (${candidateName.toUpperCase()})
+========================================
+${userInstruction && userInstruction.trim() 
+  ? `Instruction explicite : "${userInstruction.trim()}"`
+  : `Aucune instruction particulière : propose une réponse pertinente, chaleureuse et naturelle au dernier message.`
+}
+${refinementContext ? `Ajustement demandé : "${refinementContext.trim()}"` : ""}
+
+========================================
+5. RÈGLES STRICTES DE RÉDACTION
+========================================
+1. RÈGLE D'OR : Le message produit est la RÉPONSE prête à l'envoi. NE recopiez JAMAIS l'instruction comme si c'était le message (ex: si l'instruction est "réponds à Milan", ne répondez pas "réponds à Milan", mais rédigez la véritable réponse adressée à Milan !).
+2. PRIORITÉ DU CONTEXTE : CONVERSATION RÉELLE > INSTRUCTION UTILISATEUR > CONTEXTE CONTACT > PROFIL.
+3. TON COHÉRENT : ${isTutoiement ? "TUTOIEMENT naturel (ex: 'Salut Milan', 'Merci pour ton retour !', 'tu', 'toi')." : "VOUVOIEMENT professionnel et courtois (ex: 'Bonjour Milan', 'Je vous remercie pour votre retour', 'vous')."}
+4. FORMAT : Concision adaptée à ${channel === "email" ? "un email direct et clair" : "LinkedIn (message fluide, direct, 2 à 4 paragraphes courts, sans lourdeur corporate)"}.
+5. ANTI-INVENTION : Ne pas inventer de faux rendez-vous ou d'entretiens imaginaires. Répondre directement aux points soulevés par ${contactFirstName}.
+6. RETOUR ATTENDU : Fournissez EXCLUSIVEMENT le texte brut du message rédigé (sans guillemets d'encadrement, sans explications méta, sans formule comme 'Voici ma proposition :').
+`;
+
+  try {
+    const ai = getAi();
+    for (const model of CASCADE_MODELS) {
+      try {
+        const startTime = Date.now();
+        const response = await ai.models.generateContent({
+          model,
+          contents: prompt,
+          config: {
+            temperature: 0.35,
+          }
+        });
+
+        trackGeminiCall({
+          feature: "Assistant Composer Conversation IA",
+          featureCategory: "ai_assistant",
+          model,
+          promptText: prompt,
+          response,
+          durationMs: Date.now() - startTime,
+          contextSnippet: `Génération de réponse pour ${contactName} (${channel})`
+        });
+
+        let replyText = (response.text || "").trim();
+        // Remove enclosing quotes or markdown block markers if any
+        replyText = replyText.replace(/^```[a-z]*\n?/i, "").replace(/\n?```$/i, "").trim();
+        if (replyText.startsWith('"') && replyText.endsWith('"') && replyText.length > 2) {
+          replyText = replyText.slice(1, -1).trim();
+        }
+
+        if (replyText.length > 10) {
+          return {
+            reply: replyText,
+            detectedTone,
+            instructionHandled: Boolean(userInstruction && userInstruction.trim())
+          };
+        }
+      } catch (err) {
+        console.warn(`[generateConversationReply] Model ${model} failed, trying next:`, err);
+      }
+    }
+  } catch (e) {
+    console.warn("Gemini generateConversationReply failed, falling back to deterministic reply generator:", e);
+  }
+
+  // Smart deterministic reply builder
+  const reply = buildDeterministicConversationReply({
+    contact,
+    profile,
+    lastContactMsg: lastContactMsg?.text || "",
+    isTutoiement,
+    userInstruction
+  });
+
+  return {
+    reply,
+    detectedTone,
+    instructionHandled: Boolean(userInstruction && userInstruction.trim())
+  };
+}
+
+/**
+ * Deterministic local fallback generator when offline or Gemini API is not reachable.
+ */
+function buildDeterministicConversationReply(params: {
+  contact: Contact;
+  profile: CandidateProfile;
+  lastContactMsg: string;
+  isTutoiement: boolean;
+  userInstruction?: string;
+}): string {
+  const { contact, profile, lastContactMsg, isTutoiement, userInstruction } = params;
+  const contactFirstName = contact.firstName || contact.fullName.split(" ")[0] || "Bonjour";
+  const candidateFirstName = profile.firstName || "Nathan";
+  const instr = (userInstruction || "").toLowerCase();
+
+  // Greeting
+  const greeting = isTutoiement ? `Salut ${contactFirstName},` : `Bonjour ${contactFirstName},`;
+  const signOff = isTutoiement ? `Belle journée,\n${candidateFirstName}` : `Bien cordialement,\n${candidateFirstName}`;
+
+  // Check specific user constraints in instruction
+  if (instr.includes("mardi") || instr.includes("dispo") || instr.includes("disponible") || instr.includes("créneau") || instr.includes("creneau")) {
+    if (isTutoiement) {
+      return `${greeting}\n\nMerci beaucoup pour ton retour ! Je suis bien disponible mardi si tu souhaites qu'on échange 10 minutes.\n\nDis-moi quel créneau te conviendrait le mieux.\n\n${signOff}`;
+    } else {
+      return `${greeting}\n\nJe vous remercie pour votre retour. Je suis tout à fait disponible mardi pour un court échange selon vos disponibilités.\n\nN'hésitez pas à m'indiquer le créneau qui vous conviendrait le mieux.\n\n${signOff}`;
+    }
+  }
+
+  if (instr.includes("court") || instr.includes("bref") || instr.includes("concis")) {
+    if (isTutoiement) {
+      return `${greeting}\n\nMerci pour ton retour ! C'est très clair. Je te tiens au courant de la suite de mes démarches.\n\n${signOff}`;
+    } else {
+      return `${greeting}\n\nJe vous remercie pour votre retour rapide et vos précisions. Je ne manquerai pas de vous tenir informé de mes avancées.\n\n${signOff}`;
+    }
+  }
+
+  // Handle reply to a situation update like in user prompt (e.g. Milan's message)
+  if (lastContactMsg && (lastContactMsg.toLowerCase().includes("désolé") || lastContactMsg.toLowerCase().includes("desole") || lastContactMsg.toLowerCase().includes("avancée") || lastContactMsg.toLowerCase().includes("avancee"))) {
+    if (isTutoiement) {
+      return `${greeting}\n\nPas de souci ! Oui, ça commence à bien se préciser de mon côté. J’ai notamment eu plusieurs retours sur mes entretiens, donc j’y vois un peu plus clair maintenant.\n\nMerci en tout cas pour ton retour et ton écoute !\n\n${signOff}`;
+    } else {
+      return `${greeting}\n\nJe vous remercie pour votre message. Les choses avancent bien de mon côté et mes démarches se précisent suite à mes récents échanges.\n\nMerci encore pour votre bienveillance et votre retour !\n\n${signOff}`;
+    }
+  }
+
+  if (isTutoiement) {
+    return `${greeting}\n\nMerci beaucoup pour ton retour ! C'est super instructif.\n\nSeriez-tu partant pour qu'on se cale un court appel de 10 minutes cette semaine si tu as un moment ?\n\n${signOff}`;
+  } else {
+    return `${greeting}\n\nJe vous remercie vivement pour votre retour et votre éclairage.\n\nSeriez-vous ouvert(e) à un court échange téléphonique de 10 minutes selon vos convenances ?\n\n${signOff}`;
+  }
+}
+
+
 
 
 

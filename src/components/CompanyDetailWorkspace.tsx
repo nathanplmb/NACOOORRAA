@@ -4,6 +4,7 @@ import { dbStore } from "../dbStore";
 import { Company, Contact, Opportunity, ContactCategory } from "../types";
 import { GlassCard, Badge, GlassButton, Modal } from "./Shared";
 import { getCompanyTheme } from "../utils/companyColors";
+import { NetworkingMessageGenerator } from "./network/NetworkingMessageGenerator";
 import { 
   Building2, 
   Search, 
@@ -64,6 +65,9 @@ export const CompanyDetailWorkspace: React.FC<CompanyDetailWorkspaceProps> = ({
   const [notesDraft, setNotesDraft] = useState(company.notes || "");
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const [hasCopiedEmail, setHasCopiedEmail] = useState(false);
+  const [isOutreachModalOpen, setIsOutreachModalOpen] = useState(false);
+  const [outreachContact, setOutreachContact] = useState<Contact | null>(null);
+  const candidateProfile = dbStore.getProfile();
 
   const theme = getCompanyTheme(company.sector, company.name);
 
@@ -293,6 +297,34 @@ export const CompanyDetailWorkspace: React.FC<CompanyDetailWorkspaceProps> = ({
                   <ExternalLink className="w-3 h-3 ml-0.5 opacity-70" />
                 </a>
               )}
+
+              <GlassButton
+                variant="ai"
+                size="sm"
+                onClick={() => {
+                  const defaultContact: Contact = {
+                    id: `company_contact_${company.id || company.name}`,
+                    fullName: `Contact ${company.name}`,
+                    firstName: "Responsable Recrutement",
+                    lastName: company.name,
+                    companyId: company.id || "",
+                    companyName: company.name,
+                    jobTitle: "Responsable Recrutement / Décideur",
+                    normalizedJobTitle: "Responsable Recrutement",
+                    category: "recruiter",
+                    relevanceScore: 90,
+                    connectionPoints: [company.sector || "Banque & Finance"],
+                    previousCompanies: [],
+                    notes: `Entreprise : ${company.name} (${company.sector || ""})`,
+                    createdAt: new Date().toISOString()
+                  };
+                  setOutreachContact(defaultContact);
+                  setIsOutreachModalOpen(true);
+                }}
+                icon={<Sparkles className="w-3.5 h-3.5 text-white" />}
+              >
+                {language === "en" ? "Outreach AI" : "Prise de Contact IA"}
+              </GlassButton>
 
               <GlassButton
                 variant="primary"
@@ -540,6 +572,59 @@ export const CompanyDetailWorkspace: React.FC<CompanyDetailWorkspaceProps> = ({
               />
             </div>
 
+            {/* Associated Contacts Summary in Overview Tab */}
+            <div className="p-5 sm:p-6 rounded-2xl backdrop-blur-xl bg-white/[0.035] border border-white/10 shadow-[0_8px_30px_rgba(0,0,0,0.25),inset_0_1px_1px_rgba(255,255,255,0.15)] space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#38BDF8] uppercase tracking-wider flex items-center gap-2 font-display">
+                  <Users className="w-4 h-4 text-[#38BDF8]" />
+                  {language === "en" ? "Key Network Contacts at this Company" : "Contacts Réseau Clés dans l'entreprise"} ({associatedContacts.length})
+                </span>
+                {associatedContacts.length > 0 && (
+                  <button
+                    onClick={() => setActiveTab("ecosysteme")}
+                    className="text-xs text-[#38BDF8] hover:text-white flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                  >
+                    <span>{language === "en" ? "View all ecosystem" : "Voir tout l'écosystème"}</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {associatedContacts.length === 0 ? (
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-dashed border-white/10 text-xs text-[#9AA0B2] flex items-center justify-between gap-4">
+                  <p>{language === "en" ? "No contacts recorded at this company yet." : "Aucun contact répertorié dans cette entreprise pour le moment."}</p>
+                  <span className="text-[11px] text-[#9AA0B2]">Ajoutez un contact depuis l'onglet Contacts</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {associatedContacts.slice(0, 6).map((c) => (
+                    <div
+                      key={c.id}
+                      onClick={() => onSelectContact && onSelectContact(c.id)}
+                      className="p-3.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 hover:border-white/20 transition-all cursor-pointer flex items-center justify-between group shadow-sm hover:-translate-y-0.5"
+                    >
+                      <div className="space-y-1 min-w-0 pr-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-bold text-[#F5F6FA] group-hover:text-[#38BDF8] transition-colors truncate">
+                            {c.fullName}
+                          </span>
+                          {c.function && c.function !== "Inconnue" && (
+                            <span className="px-1.5 py-0.2 rounded bg-[rgba(192,132,252,0.12)] border border-[rgba(192,132,252,0.25)] text-[#C084FC] text-[9px] font-semibold uppercase tracking-wider">
+                              {c.function}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-[#9AA0B2] truncate">
+                          {c.jobTitle}
+                        </p>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-[#9AA0B2] group-hover:text-[#38BDF8] shrink-0 transition-colors" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
           </div>
         )}
 
@@ -651,6 +736,11 @@ export const CompanyDetailWorkspace: React.FC<CompanyDetailWorkspaceProps> = ({
                             {contact.fullName}
                           </span>
                           {handleCategoryBadge(contact.category)}
+                          {contact.function && contact.function !== "Inconnue" && (
+                            <span className="px-2 py-0.5 rounded-md bg-[rgba(192,132,252,0.1)] border border-[rgba(192,132,252,0.25)] text-[#C084FC] text-[10px] font-semibold tracking-wide uppercase">
+                              {contact.function}
+                            </span>
+                          )}
                         </div>
                         <p className="text-[11px] text-[#9AA0B2] truncate">
                           {contact.jobTitle}
@@ -843,6 +933,29 @@ export const CompanyDetailWorkspace: React.FC<CompanyDetailWorkspaceProps> = ({
             {language === "en" ? "Back to company list" : "Retour à la liste"}
           </button>
         </div>
+
+        {/* Modal Outreach & Prise de contact IA */}
+        {isOutreachModalOpen && outreachContact && (
+          <Modal
+            isOpen={isOutreachModalOpen}
+            onClose={() => setIsOutreachModalOpen(false)}
+            title={`Prise de Contact & Outreach IA • ${company.name}`}
+          >
+            <div className="space-y-4">
+              <p className="text-xs text-[#9AA0B2]">
+                Générez des messages LinkedIn et Email sur-mesure pour aborder les décideurs et recruteurs de <strong>{company.name}</strong> avec la méthodologie de référence NACORA.
+              </p>
+              <NetworkingMessageGenerator
+                contact={outreachContact}
+                profile={candidateProfile}
+                onUpdate={(updated) => {
+                  setOutreachContact(updated);
+                }}
+                showToast={showToast}
+              />
+            </div>
+          </Modal>
+        )}
 
       </div>
     </div>

@@ -5,19 +5,31 @@ export function CookieBanner() {
   const [accepted, setAccepted] = useState(false);
 
   useEffect(() => {
-    const consent = localStorage.getItem("nacora_cookie_consent");
-    if (consent) {
-      setAccepted(true);
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      try {
+        const consent = localStorage.getItem("nacora_cookie_consent");
+        if (consent) {
+          setAccepted(true);
+        }
+      } catch (_) {}
     }
   }, []);
 
   const handleAccept = () => {
-    localStorage.setItem("nacora_cookie_consent", "true");
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem("nacora_cookie_consent", "true");
+      } catch (_) {}
+    }
     setAccepted(true);
   };
 
   const handleDecline = () => {
-    localStorage.setItem("nacora_cookie_consent", "false");
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem("nacora_cookie_consent", "false");
+      } catch (_) {}
+    }
     setAccepted(true);
   };
 

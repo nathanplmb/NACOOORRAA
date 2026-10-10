@@ -56,23 +56,35 @@ export const Profile: React.FC = () => {
     }, 3000);
   };
 
-  const handleUpdateProfile = (updatedFields: Partial<CandidateProfile>) => {
-    dbStore.updateProfile(updatedFields);
-    showToast(language === "en" ? "Profile updated successfully" : "Profil mis à jour avec succès");
+  const handleUpdateProfile = async (updatedFields: Partial<CandidateProfile>) => {
+    try {
+      await dbStore.saveUserProfile(updatedFields);
+      showToast(language === "en" ? "Profile updated successfully" : "Profil et objectifs enregistrés avec succès");
+    } catch (err) {
+      showToast(language === "en" ? "Error saving profile" : "Erreur lors de l'enregistrement du profil");
+    }
   };
 
-  const handleSaveExperiences = (updatedExperiences: DetailedExperience[]) => {
-    dbStore.updateProfile({
-      experiences: updatedExperiences,
-    });
-    showToast(language === "en" ? "Experiences updated" : "Expériences mises à jour");
+  const handleSaveExperiences = async (updatedExperiences: DetailedExperience[]) => {
+    try {
+      await dbStore.saveUserProfile({
+        experiences: updatedExperiences,
+      });
+      showToast(language === "en" ? "Experiences updated" : "Expériences enregistrées avec succès");
+    } catch (err) {
+      showToast(language === "en" ? "Error saving experiences" : "Erreur d'enregistrement des expériences");
+    }
   };
 
-  const handleSaveEducations = (updatedEducations: DetailedEducation[]) => {
-    dbStore.updateProfile({
-      educations: updatedEducations,
-    });
-    showToast(language === "en" ? "Education updated" : "Formations mises à jour");
+  const handleSaveEducations = async (updatedEducations: DetailedEducation[]) => {
+    try {
+      await dbStore.saveUserProfile({
+        educations: updatedEducations,
+      });
+      showToast(language === "en" ? "Education updated" : "Formations enregistrées avec succès");
+    } catch (err) {
+      showToast(language === "en" ? "Error saving education" : "Erreur d'enregistrement des formations");
+    }
   };
 
   const { score, completedSections, totalSections, sectionsStatus } = calculateProfileCompletion(profile);

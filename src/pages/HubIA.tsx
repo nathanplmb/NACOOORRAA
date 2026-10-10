@@ -117,13 +117,17 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
 
   // Check pending initial prompt from home challenge card
   useEffect(() => {
-    const pending = localStorage.getItem("nacora_initial_ai_prompt");
-    if (pending && activeSessionId) {
-      localStorage.removeItem("nacora_initial_ai_prompt");
-      const timer = setTimeout(() => {
-        handleSendMessage(pending);
-      }, 600);
-      return () => clearTimeout(timer);
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      try {
+        const pending = localStorage.getItem("nacora_initial_ai_prompt");
+        if (pending && activeSessionId) {
+          localStorage.removeItem("nacora_initial_ai_prompt");
+          const timer = setTimeout(() => {
+            handleSendMessage(pending);
+          }, 600);
+          return () => clearTimeout(timer);
+        }
+      } catch (_) {}
     }
   }, [activeSessionId]);
 
@@ -222,7 +226,7 @@ export const HubIA: React.FC<HubIAProps> = ({ showToast, initialPersona }) => {
       } else if (personaId === "cv_letter") {
         initialGreeting = `Bonjour ${userName}. En tant qu'**Expert CV & Lettres**, je t'aide à optimiser la lisibilité ATS de ton CV, enrichir tes verbes d'action et rédiger des accroches percutantes pour tes candidatures.\n\nTransmets-moi ton texte ou demande-moi d'adapter ta lettre pour une offre précise.\n\n[ACTIONS: "Optimiser les verbes d'action" | "Rédiger une lettre sur-mesure" | "Analyse des mots-clés ATS"]`;
       } else if (personaId === "networking") {
-        initialGreeting = `Ravi de t'accompagner ${userName}. Je suis ton **Stratège Réseau**.\n\nNous allons identifier les Alumni et recruteurs stratégiques dans tes entreprises cibles, puis rédiger des messages d'approche LinkedIn personnalisés et à fort taux de réponse.\n\n[ACTIONS: "Message d'approche Alumni" | "Identifier les recruteurs clés" | "Message de relance bienveillant"]`;
+        initialGreeting = `Ravi de t'accompagner ${userName}. Je suis ton **Stratège Réseau NACORA**.\n\nJ'applique rigoureusement notre méthodologie de référence pour LinkedIn & Email (Templates 1 à 4, tutoiement/vouvoiement contextuel, relances J+7/J+14/J+21 et règles anti-invention).\n\nQuel profil ou entreprise souhaites-tu aborder ?\n\n[ACTIONS: "Template 1 : Point commun" | "Template 2 : Opportunité directe" | "Template 3 : Recommandation" | "Template 4 : Très personnalisé" | "Relance 1 (J+7)"]`;
       } else if (personaId === "negotiation") {
         initialGreeting = `Bonjour ${userName}. Je suis l'**Expert Négociation Salariale** de NACORA.\n\nNous allons évaluer ton package global (fixe, primes, gratification conventionnelle, avantages) et préparer les meilleurs arguments chiffrés pour aborder la rémunération sereinement.\n\n[ACTIONS: "Évaluer mon offre actuelle" | "Arguments de rémunération" | "Simuler l'échange de négociation"]`;
       }

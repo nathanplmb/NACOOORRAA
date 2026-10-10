@@ -2,23 +2,146 @@
   "entities": {
     "User": {
       "title": "User",
-      "description": "User profile and all associated data in a single document for simplicity in this version.",
+      "description": "User profile, CRM objects, and prospecting data in a unified document structure.",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
         "profile": { "type": "object" },
         "opportunities": { "type": "array" },
         "contacts": { "type": "array" },
         "companies": { "type": "array" },
         "calendarEvents": { "type": "array" },
         "documents": { "type": "array" },
-        "chatSessions": { "type": "array" }
-      }
+        "chatSessions": { "type": "array" },
+        "prospectLeads": { "type": "array" },
+        "prospectLists": { "type": "array" },
+        "savedSearches": { "type": "array" },
+        "prospectActivities": { "type": "array" },
+        "prospectingSettings": { "type": "object" },
+        "status": { "type": "string", "enum": ["active", "disabled", "invited", "suspended"] },
+        "role": { "type": "string", "enum": ["admin", "support", "viewer", "user"] },
+        "accessTier": { "type": "string", "enum": ["internal", "beta", "free", "pro", "enterprise"] },
+        "creditMode": { "type": "string", "enum": ["limited", "unlimited"] },
+        "creditLimit": { "type": "number" },
+        "creditsBalance": { "type": "number" },
+        "lastLoginAt": { "type": "string" },
+        "lastActivityAt": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "profile"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Security mapping for authorized administrators and team staff.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "support", "viewer"] },
+        "grantedBy": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "CreditTransaction": {
+      "title": "CreditTransaction",
+      "description": "Immutable ledger tracking each credit grant, consumption, refund, or adjustment.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["grant", "consume", "refund", "adjustment", "expiration"] },
+        "amount": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "reason": { "type": "string" },
+        "feature": { "type": "string" },
+        "model": { "type": "string" },
+        "requestId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "userId", "type", "amount", "reason", "createdAt", "createdBy"]
+    },
+    "UserSession": {
+      "title": "UserSession",
+      "description": "Session security logs tracking user activity, devices, and token status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastSeenAt": { "type": "string" },
+        "revokedAt": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "device": { "type": "string" },
+        "browser": { "type": "string" },
+        "os": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "revoked", "expired"] }
+      },
+      "required": ["id", "userId", "createdAt", "lastSeenAt", "status"]
+    },
+    "AdminAuditLog": {
+      "title": "AdminAuditLog",
+      "description": "Append-only security audit log of all administrator operations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "adminUserId": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "adminUserId", "adminEmail", "action", "createdAt"]
+    },
+    "SystemActivity": {
+      "title": "SystemActivity",
+      "description": "System-wide high-level activity timeline.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "type", "description", "createdAt"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
-      "description": "User's data document."
+      "description": "Authenticated user data document."
+    },
+    "/users_by_email/{emailDoc}": {
+      "schema": "User",
+      "description": "User fallback index document by sanitized email."
+    },
+    "/admins/{uid}": {
+      "schema": "AdminRole",
+      "description": "Authorized administrator roles."
+    },
+    "/credit_transactions/{txId}": {
+      "schema": "CreditTransaction",
+      "description": "Immutable ledger of credit transactions."
+    },
+    "/user_sessions/{sessionId}": {
+      "schema": "UserSession",
+      "description": "Application session records."
+    },
+    "/admin_audit_logs/{logId}": {
+      "schema": "AdminAuditLog",
+      "description": "Append-only administrator action audit trail."
+    },
+    "/system_activities/{activityId}": {
+      "schema": "SystemActivity",
+      "description": "Real-time activity timeline events."
     }
   }
 }

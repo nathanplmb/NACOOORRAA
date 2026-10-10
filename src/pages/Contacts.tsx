@@ -1,20 +1,22 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useLanguage } from "../context/LanguageContext";
 import { dbStore } from "../dbStore";
 import { Contact, ContactCategory, ContactNetworkingStatus, CandidateProfile } from "../types";
-import { getCategoryBadgeStyle, isHumanResourcesRole, isBankingAndFinanceRole, computePrimaryCategory } from "../utils/contactMerger";
-import { GlassCard, Badge, GlassButton, Modal } from "../components/Shared";
+import { getCategoryBadgeStyle, isHumanResourcesRole, isBankingAndFinanceRole } from "../utils/contactMerger";
+import { GlassCard, GlassButton, Modal } from "../components/Shared";
 import { LinkedInImportModal } from "../components/LinkedInImportModal";
 import { ImportContactsTextModal } from "../components/ImportContactsTextModal";
+import { ConversationImportModal } from "../components/ConversationImportModal";
 import { ContactDetailWorkspace } from "../components/ContactDetailWorkspace";
 import { computeStrategicInterests } from "../utils/strategicInterests";
+import { classifyContactFunction, STANDARD_CONTACT_FUNCTIONS } from "../utils/contactTaxonomy";
+import { resolveCompany } from "../utils/companyResolver";
 import { 
   Users, 
-  Upload, 
   Search, 
   Sparkles, 
-  CheckCircle, 
   Plus, 
+  MessageSquare, 
   ChevronRight, 
   Linkedin, 
   Mail, 
@@ -22,25 +24,35 @@ import {
   Building2, 
   Briefcase, 
   GraduationCap, 
-  Filter, 
   X, 
-  ArrowUpDown, 
   ArrowUp,
   ArrowDown,
   SlidersHorizontal,
+  Link as LinkIcon, 
+  UserCheck, 
+  Trash2, 
+  Check, 
+  RotateCcw, 
+  Target, 
+  Sliders,
+  LayoutList,
+  LayoutGrid,
+  CheckSquare,
+  Square,
+  Copy,
+  Download,
+  MoreHorizontal,
+  Edit3,
+  ExternalLink,
+  TrendingUp,
   Award,
-  Link as LinkIcon,
-  UserCheck,
-  Trash2,
-  Check,
-  RotateCcw,
-  Target,
-  BadgeCheck,
-  Sliders
+  Layers,
+  Calendar
 } from "lucide-react";
 
 export type ContactSortOption = "relevance" | "name" | "company" | "job" | "recent" | "status";
 export type ContactSortDirection = "asc" | "desc";
+export type ViewMode = "list" | "grid";
 
 interface FilterOption {
   id: string;
@@ -88,13 +100,24 @@ interface ContactsProps {
   onClearInitialContact?: () => void;
 }
 
-export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initialSelectedContactId, onClearInitialContact }) => {
+export const Contacts: React.FC<ContactsProps> = ({ 
+  showToast, 
+  searchTerm, 
+  initialSelectedContactId, 
+  onClearInitialContact 
+}) => {
   const { language, t } = useLanguage();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [profile, setProfile] = useState<CandidateProfile>(dbStore.getProfile());
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
 
-  // Filters & Search
+  // View mode (list is standard SaaS CRM, grid is visual cards)
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+
+  // Selection state for multi-action
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Search & Filters
   const [localSearch, setLocalSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
@@ -105,6 +128,7 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
   const [minScoreFilter, setMinScoreFilter] = useState<number>(0);
   const [onlyLinkedIn, setOnlyLinkedIn] = useState<boolean>(false);
   const [onlyEmail, setOnlyEmail] = useState<boolean>(false);
+  const [onlyPhone, setOnlyPhone] = useState<boolean>(false);
   const [onlyOpportunityLinked, setOnlyOpportunityLinked] = useState<boolean>(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
 
@@ -115,22 +139,29 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
   // Modals
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isTextImportModalOpen, setIsTextImportModalOpen] = useState(false);
+  const [isConversationImportModalOpen, setIsConversationImportModalOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [contactToEdit, setContactToEdit] = useState<Contact | null>(null);
   const [contactToDelete, setContactToDelete] = useState<Contact | null>(null);
+  const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState(false);
 
   // Add Contact Form State
   const [formName, setFormName] = useState("");
   const [formCompany, setFormCompany] = useState("");
   const [formJob, setFormJob] = useState("");
+  const [formFunction, setFormFunction] = useState<string>("auto");
   const [formCategory, setFormCategory] = useState<ContactCategory>("other");
   const [formEmail, setFormEmail] = useState("");
   const [formPhone, setFormPhone] = useState("");
   const [formLinkedIn, setFormLinkedIn] = useState("");
   const [formContactUrl, setFormContactUrl] = useState("");
+  const [formLocation, setFormLocation] = useState("");
   const [formNotes, setFormNotes] = useState("");
 
+  // Menu action state
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+
   useEffect(() => {
-    // Auto-reconcile misclassified contacts (e.g. RH/Recruiters and bank advisors)
     dbStore.reconcileContactCategories();
     const allContacts = dbStore.getContacts();
     setContacts(allContacts);
@@ -149,7 +180,6 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
       setContacts(freshContacts);
       setProfile(dbStore.getProfile());
 
-      // Keep selected contact synced
       if (selectedContact) {
         const fresh = freshContacts.find(c => c.id === selectedContact.id);
         if (fresh) setSelectedContact(fresh);
@@ -158,19 +188,19 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     return unsub;
   }, [initialSelectedContactId, selectedContact?.id]);
 
-  // Distinct company list from contacts for filter
-  const companyOptions = Array.from(new Set(contacts.map(c => c.companyName).filter(Boolean))).sort();
+  // Distinct company list
+  const companyOptions = useMemo(() => {
+    return Array.from(new Set(contacts.map(c => c.companyName).filter(Boolean))).sort();
+  }, [contacts]);
 
-  // Helper: check if contact matches a given category (primary, multidimensional, or contextual)
+  // Category filter matcher
   const contactMatchesCategoryFilter = (c: Contact, filter: string): boolean => {
     if (filter === "all") return true;
 
-    // Strict role detection
     const isHR = isHumanResourcesRole(c.jobTitle) || isHumanResourcesRole(c.normalizedJobTitle);
     const isFinanceOrBank = isBankingAndFinanceRole(c.jobTitle, c.companyName) || isBankingAndFinanceRole(c.normalizedJobTitle, c.companyName);
 
     if (filter === "recruiter") {
-      // Must be actual HR / Talent Acquisition and NOT an operational banker/advisor
       if (isFinanceOrBank && !isHR) return false;
       if (isHR) return true;
       if (c.category === "recruiter" && !isFinanceOrBank) return true;
@@ -213,38 +243,19 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     return c.category === filter;
   };
 
-  // Statistics supporting multidimensional classifications
-  const totalCount = contacts.length;
-  const alumniCount = contacts.filter(c => contactMatchesCategoryFilter(c, "alumni")).length;
-  const recruiterCount = contacts.filter(c => contactMatchesCategoryFilter(c, "recruiter")).length;
-  const sectorProCount = contacts.filter(c => contactMatchesCategoryFilter(c, "sector_pro")).length;
-  const studentCount = contacts.filter(c => contactMatchesCategoryFilter(c, "student")).length;
-  const linkedOppCount = contacts.filter(c => Boolean(c.opportunityId)).length;
-
-  const handleCategoryBadge = (category: ContactCategory) => {
-    switch (category) {
-      case "recruiter":
-        return <Badge variant="green">{language === "en" ? "Recruiter / HR" : "Recruteur / RH"}</Badge>;
-      case "alumni":
-        return <Badge variant="blue">Alumni</Badge>;
-      case "student":
-        return <Badge variant="purple">{language === "en" ? "Student" : "Étudiant"}</Badge>;
-      case "sector_pro":
-        return <Badge variant="crimson">{language === "en" ? "Target Sector Pro" : "Pro Secteur Cible"}</Badge>;
-      case "other_pro":
-        return <Badge variant="amber">{language === "en" ? "Other Sector Pro" : "Pro Autre Secteur"}</Badge>;
-      default:
-        return <Badge variant="gray">{language === "en" ? "Other" : "Autre"}</Badge>;
-    }
-  };
-
-  // Helper matchers for fine-grained filters
+  // Fine-grained filter matchers
   const matchFunction = (c: Contact, filterId: string): boolean => {
     if (filterId === "all") return true;
     const opt = FUNCTION_FILTER_OPTIONS.find(o => o.id === filterId);
     if (!opt || !opt.keywords) return true;
     
-    // Check in categories
+    // 1. Direct match on normalized function field
+    if (c.function && c.function !== "Inconnue") {
+      const fn = c.function.toLowerCase();
+      if (opt.keywords.some(kw => fn.includes(kw)) || opt.label.toLowerCase().includes(fn)) return true;
+    }
+
+    // 2. Multidimensional categories & professional profile
     if (c.categories && c.categories.some(cat => {
       const sub = (cat.subcategory || "").toLowerCase();
       const reason = (cat.reason || "").toLowerCase();
@@ -252,12 +263,10 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     })) {
       return true;
     }
-    // Check in professionalProfile
     if (c.professionalProfile?.currentFunction) {
       const fn = c.professionalProfile.currentFunction.toLowerCase();
       if (opt.keywords.some(kw => fn.includes(kw))) return true;
     }
-    // Check in job titles
     const title = `${c.normalizedJobTitle || ""} ${c.jobTitle || ""}`.toLowerCase();
     return opt.keywords.some(kw => title.includes(kw));
   };
@@ -267,7 +276,6 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     const opt = SENIORITY_FILTER_OPTIONS.find(o => o.id === filterId);
     if (!opt || !opt.keywords) return true;
 
-    // Check in categories
     if (c.categories && c.categories.some(cat => {
       if (cat.category === "seniority" || cat.category === "status") {
         const sub = (cat.subcategory || "").toLowerCase();
@@ -277,12 +285,10 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     })) {
       return true;
     }
-    // Check in professionalProfile
     if (c.professionalProfile?.level) {
       const lvl = c.professionalProfile.level.toLowerCase();
       if (opt.keywords.some(kw => lvl.includes(kw))) return true;
     }
-    // Check in job title
     const title = `${c.normalizedJobTitle || ""} ${c.jobTitle || ""}`.toLowerCase();
     return opt.keywords.some(kw => title.includes(kw));
   };
@@ -309,7 +315,31 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     return true;
   };
 
-  // Active filter counters
+  // Real statistics calculations
+  const totalCount = contacts.length;
+  const activeCount = useMemo(() => {
+    return contacts.filter(c => (c.networkingStatus || "to_contact") !== "not_interested").length;
+  }, [contacts]);
+  const uniqueCompaniesCount = useMemo(() => {
+    return new Set(contacts.map(c => c.companyName.trim().toLowerCase()).filter(Boolean)).size;
+  }, [contacts]);
+  const alumniCount = useMemo(() => {
+    return contacts.filter(c => contactMatchesCategoryFilter(c, "alumni")).length;
+  }, [contacts]);
+  const recruiterCount = useMemo(() => {
+    return contacts.filter(c => contactMatchesCategoryFilter(c, "recruiter")).length;
+  }, [contacts]);
+  const sectorProCount = useMemo(() => {
+    return contacts.filter(c => contactMatchesCategoryFilter(c, "sector_pro")).length;
+  }, [contacts]);
+  const studentCount = useMemo(() => {
+    return contacts.filter(c => contactMatchesCategoryFilter(c, "student")).length;
+  }, [contacts]);
+  const linkedOppCount = useMemo(() => {
+    return contacts.filter(c => Boolean(c.opportunityId)).length;
+  }, [contacts]);
+
+  // Active filters counting
   const activeAdvancedFilterCount = [
     functionFilter !== "all",
     seniorityFilter !== "all",
@@ -319,6 +349,7 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     minScoreFilter > 0,
     onlyLinkedIn,
     onlyEmail,
+    onlyPhone,
     onlyOpportunityLinked
   ].filter(Boolean).length;
 
@@ -338,17 +369,16 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     setMinScoreFilter(0);
     setOnlyLinkedIn(false);
     setOnlyEmail(false);
+    setOnlyPhone(false);
     setOnlyOpportunityLinked(false);
   };
 
-  // Quick Sort Helper with directional toggle
+  // Quick Sort Helper
   const handleQuickSort = (key: ContactSortOption) => {
     if (sortBy === key) {
-      // Toggle order
       setSortOrder(prev => prev === "asc" ? "desc" : "asc");
     } else {
       setSortBy(key);
-      // Default natural order: A-Z for text, High-to-low for score/date
       if (key === "name" || key === "company" || key === "job") {
         setSortOrder("asc");
       } else {
@@ -360,82 +390,190 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
   // Filter & Sort contacts
   const effectiveSearch = (localSearch || searchTerm).toLowerCase().trim();
 
-  const filteredContacts = contacts.filter(c => {
-    const matchesSearch = !effectiveSearch || (
-      c.fullName.toLowerCase().includes(effectiveSearch) ||
-      c.companyName.toLowerCase().includes(effectiveSearch) ||
-      c.jobTitle.toLowerCase().includes(effectiveSearch) ||
-      (c.academicPath && c.academicPath.toLowerCase().includes(effectiveSearch)) ||
-      (c.connectionPoints && c.connectionPoints.some(pt => pt.toLowerCase().includes(effectiveSearch))) ||
-      (c.categories && c.categories.some(cat => cat.subcategory.toLowerCase().includes(effectiveSearch) || (cat.reason && cat.reason.toLowerCase().includes(effectiveSearch))))
+  const filteredContacts = useMemo(() => {
+    return contacts.filter(c => {
+      const matchesSearch = !effectiveSearch || (
+        c.fullName.toLowerCase().includes(effectiveSearch) ||
+        c.companyName.toLowerCase().includes(effectiveSearch) ||
+        c.jobTitle.toLowerCase().includes(effectiveSearch) ||
+        (c.email && c.email.toLowerCase().includes(effectiveSearch)) ||
+        (c.phone && c.phone.toLowerCase().includes(effectiveSearch)) ||
+        (c.academicPath && c.academicPath.toLowerCase().includes(effectiveSearch)) ||
+        (c.connectionPoints && c.connectionPoints.some(pt => pt.toLowerCase().includes(effectiveSearch))) ||
+        (c.categories && c.categories.some(cat => cat.subcategory.toLowerCase().includes(effectiveSearch) || (cat.reason && cat.reason.toLowerCase().includes(effectiveSearch))))
+      );
+
+      const matchesCategory = contactMatchesCategoryFilter(c, categoryFilter);
+      const matchesCompany = companyFilter === "all" || c.companyName.toLowerCase() === companyFilter.toLowerCase();
+      const matchesStatus = statusFilter === "all" || (c.networkingStatus || "to_contact") === statusFilter;
+      const matchesFunction = matchFunction(c, functionFilter);
+      const matchesSeniority = matchSeniority(c, seniorityFilter);
+      const matchesAcademic = matchAcademic(c, academicFilter);
+      const matchesScore = minScoreFilter === 0 || (c.relevanceScore || 0) >= minScoreFilter;
+      const matchesLinkedIn = !onlyLinkedIn || Boolean(c.linkedInUrl);
+      const matchesEmail = !onlyEmail || Boolean(c.email);
+      const matchesPhone = !onlyPhone || Boolean(c.phone);
+      const matchesOpportunity = !onlyOpportunityLinked || Boolean(c.opportunityId);
+
+      return (
+        matchesSearch &&
+        matchesCategory &&
+        matchesCompany &&
+        matchesStatus &&
+        matchesFunction &&
+        matchesSeniority &&
+        matchesAcademic &&
+        matchesScore &&
+        matchesLinkedIn &&
+        matchesEmail &&
+        matchesPhone &&
+        matchesOpportunity
+      );
+    }).sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortBy) {
+        case "relevance":
+          comparison = (b.relevanceScore || 0) - (a.relevanceScore || 0);
+          break;
+        case "name":
+          comparison = a.fullName.localeCompare(b.fullName, "fr", { sensitivity: "base" });
+          break;
+        case "company":
+          comparison = (a.companyName || "").localeCompare(b.companyName || "", "fr", { sensitivity: "base" });
+          break;
+        case "job":
+          const jobA = a.normalizedJobTitle || a.jobTitle || "";
+          const jobB = b.normalizedJobTitle || b.jobTitle || "";
+          comparison = jobA.localeCompare(jobB, "fr", { sensitivity: "base" });
+          break;
+        case "recent":
+          comparison = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          break;
+        case "status":
+          const orderMap: Record<string, number> = {
+            to_contact: 1,
+            contacted: 2,
+            exchanging: 3,
+            interview_done: 4,
+            not_interested: 5
+          };
+          comparison = (orderMap[a.networkingStatus || "to_contact"] || 99) - (orderMap[b.networkingStatus || "to_contact"] || 99);
+          break;
+        default:
+          comparison = 0;
+      }
+
+      if (sortBy === "name" || sortBy === "company" || sortBy === "job") {
+        return sortOrder === "asc" ? comparison : -comparison;
+      }
+      return sortOrder === "desc" ? comparison : -comparison;
+    });
+  }, [
+    contacts, 
+    effectiveSearch, 
+    categoryFilter, 
+    companyFilter, 
+    statusFilter, 
+    functionFilter, 
+    seniorityFilter, 
+    academicFilter, 
+    minScoreFilter, 
+    onlyLinkedIn, 
+    onlyEmail, 
+    onlyPhone,
+    onlyOpportunityLinked,
+    sortBy, 
+    sortOrder
+  ]);
+
+  // Selection handlers
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
+  };
 
-    const matchesCategory = contactMatchesCategoryFilter(c, categoryFilter);
-    const matchesCompany = companyFilter === "all" || c.companyName.toLowerCase() === companyFilter.toLowerCase();
-    const matchesStatus = statusFilter === "all" || (c.networkingStatus || "to_contact") === statusFilter;
-    const matchesFunction = matchFunction(c, functionFilter);
-    const matchesSeniority = matchSeniority(c, seniorityFilter);
-    const matchesAcademic = matchAcademic(c, academicFilter);
-    const matchesScore = minScoreFilter === 0 || (c.relevanceScore || 0) >= minScoreFilter;
-    const matchesLinkedIn = !onlyLinkedIn || Boolean(c.linkedInUrl);
-    const matchesEmail = !onlyEmail || Boolean(c.email);
-    const matchesOpportunity = !onlyOpportunityLinked || Boolean(c.opportunityId);
+  const handleSelectAllVisible = () => {
+    if (selectedIds.length === filteredContacts.length && filteredContacts.length > 0) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredContacts.map(c => c.id));
+    }
+  };
 
-    return (
-      matchesSearch &&
-      matchesCategory &&
-      matchesCompany &&
-      matchesStatus &&
-      matchesFunction &&
-      matchesSeniority &&
-      matchesAcademic &&
-      matchesScore &&
-      matchesLinkedIn &&
-      matchesEmail &&
-      matchesOpportunity
-    );
-  }).sort((a, b) => {
-    let comparison = 0;
+  const handleDeselectAll = () => {
+    setSelectedIds([]);
+  };
 
-    switch (sortBy) {
-      case "relevance":
-        comparison = (b.relevanceScore || 0) - (a.relevanceScore || 0);
-        break;
-      case "name":
-        comparison = a.fullName.localeCompare(b.fullName, "fr", { sensitivity: "base" });
-        break;
-      case "company":
-        comparison = (a.companyName || "").localeCompare(b.companyName || "", "fr", { sensitivity: "base" });
-        break;
-      case "job":
-        const jobA = a.normalizedJobTitle || a.jobTitle || "";
-        const jobB = b.normalizedJobTitle || b.jobTitle || "";
-        comparison = jobA.localeCompare(jobB, "fr", { sensitivity: "base" });
-        break;
-      case "recent":
-        comparison = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        break;
-      case "status":
-        const orderMap: Record<string, number> = {
-          to_contact: 1,
-          contacted: 2,
-          exchanging: 3,
-          interview_done: 4,
-          not_interested: 5
+  // Status badge styling
+  const getStatusBadge = (status?: ContactNetworkingStatus) => {
+    switch (status) {
+      case "contacted":
+        return { 
+          label: "Message envoyé", 
+          dotColor: "bg-[#38BDF8]",
+          textColor: "text-[#38BDF8]",
+          bg: "bg-[rgba(56,189,248,0.08)] border-[rgba(56,189,248,0.22)]"
         };
-        comparison = (orderMap[a.networkingStatus || "to_contact"] || 99) - (orderMap[b.networkingStatus || "to_contact"] || 99);
-        break;
+      case "exchanging":
+        return { 
+          label: "Échange en cours", 
+          dotColor: "bg-[#C084FC]",
+          textColor: "text-[#C084FC]",
+          bg: "bg-[rgba(192,132,252,0.08)] border-[rgba(192,132,252,0.22)]"
+        };
+      case "interview_done":
+        return { 
+          label: "Entretien réalisé", 
+          dotColor: "bg-[#34D399]",
+          textColor: "text-[#34D399]",
+          bg: "bg-[rgba(18,183,106,0.08)] border-[rgba(18,183,106,0.22)]"
+        };
+      case "not_interested":
+        return { 
+          label: "Sans suite", 
+          dotColor: "bg-[#9AA0B2]",
+          textColor: "text-[#9AA0B2]",
+          bg: "bg-white/[0.03] border-white/8"
+        };
+      case "to_contact":
       default:
-        comparison = 0;
+        return { 
+          label: "À contacter", 
+          dotColor: "bg-[#FBBF24]",
+          textColor: "text-[#FBBF24]",
+          bg: "bg-[rgba(247,144,9,0.08)] border-[rgba(247,144,9,0.22)]"
+        };
     }
+  };
 
-    if (sortBy === "name" || sortBy === "company" || sortBy === "job") {
-      return sortOrder === "asc" ? comparison : -comparison;
+  // Initial generator for Avatar
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(" ");
+    if (parts.length === 0) return "C";
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
+  // Avatar color generator based on name hash
+  const getAvatarGradient = (name: string) => {
+    const gradients = [
+      "from-rose-500/20 to-pink-600/20 text-[#FF6685] border-[#FF6685]/30",
+      "from-emerald-500/20 to-teal-600/20 text-[#34D399] border-[#34D399]/30",
+      "from-sky-500/20 to-blue-600/20 text-[#38BDF8] border-[#38BDF8]/30",
+      "from-purple-500/20 to-indigo-600/20 text-[#C084FC] border-[#C084FC]/30",
+      "from-amber-500/20 to-orange-600/20 text-[#FBBF24] border-[#FBBF24]/30"
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
     }
-    return sortOrder === "desc" ? comparison : -comparison;
-  });
+    const idx = Math.abs(hash) % gradients.length;
+    return gradients[idx];
+  };
 
-  // Manual Add Contact
+  // Add Contact action
   const handleAddContact = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName || !formCompany || !formJob) {
@@ -447,7 +585,16 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     const firstName = nameParts[0] || "";
     const lastName = nameParts.slice(1).join(" ") || "";
 
-    const linkedCo = dbStore.getCompanyByNameOrCreate(formCompany);
+    const { company: linkedCo } = resolveCompany({ companyName: formCompany });
+
+    const funcClassification = formFunction && formFunction !== "auto"
+      ? {
+          function: formFunction,
+          functionSource: "manual" as const,
+          functionConfidence: "high" as const,
+          functionClassifiedAt: new Date().toISOString()
+        }
+      : classifyContactFunction(formJob.trim(), linkedCo.name);
 
     const strategic = computeStrategicInterests({
       fullName: formName.trim(),
@@ -457,7 +604,7 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
       notes: formNotes
     }, profile);
 
-    const newContact = dbStore.addContact({
+    dbStore.addContact({
       fullName: formName.trim(),
       firstName,
       lastName,
@@ -465,6 +612,10 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
       companyName: linkedCo.name,
       jobTitle: formJob.trim(),
       normalizedJobTitle: formJob.trim(),
+      function: funcClassification.function,
+      functionSource: funcClassification.functionSource,
+      functionConfidence: funcClassification.functionConfidence,
+      functionClassifiedAt: funcClassification.functionClassifiedAt,
       category: formCategory,
       relevanceScore: strategic.relevanceScore,
       networkingRelevance: strategic.networkingRelevance,
@@ -476,12 +627,13 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
       phone: formPhone.trim() || undefined,
       linkedInUrl: formLinkedIn.trim() || undefined,
       contactUrl: formContactUrl.trim() || undefined,
+      sector: formLocation.trim() || undefined,
       networkingStatus: "to_contact",
       history: [
         {
           id: "hist_" + Math.random().toString(36).substring(2, 9),
           type: "import",
-          label: "Contact ajouté manuellement au carnet",
+          label: "Contact ajouté manuellement",
           timestamp: new Date().toISOString()
         }
       ]
@@ -491,23 +643,139 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     setFormName("");
     setFormCompany("");
     setFormJob("");
+    setFormFunction("auto");
     setFormCategory("other");
     setFormEmail("");
     setFormPhone("");
     setFormLinkedIn("");
     setFormContactUrl("");
+    setFormLocation("");
     setFormNotes("");
     setIsAddModalOpen(false);
   };
 
-  // Delete Contact
-  const handleDeleteContact = (id: string) => {
-    dbStore.deleteContact(id);
-    showToast("Contact supprimé", "info");
-    setSelectedContact(null);
+  // Edit Contact action
+  const handleUpdateContact = (updated: Contact) => {
+    dbStore.updateContact(updated);
+    setContacts(dbStore.getContacts());
+    if (selectedContact?.id === updated.id) {
+      setSelectedContact(updated);
+    }
+    setContactToEdit(null);
+    showToast("Contact mis à jour", "success");
   };
 
-  // If a contact is selected, display the full-width workspace (similar to Opportunities)
+  // Delete Contact action
+  const handleDeleteContact = (id: string) => {
+    dbStore.deleteContact(id);
+    setSelectedIds(prev => prev.filter(item => item !== id));
+    if (selectedContact?.id === id) {
+      setSelectedContact(null);
+    }
+    setContactToDelete(null);
+    showToast("Contact supprimé", "info");
+  };
+
+  // Batch Status Update
+  const handleBatchStatusChange = (newStatus: ContactNetworkingStatus) => {
+    if (selectedIds.length === 0) return;
+    const all = dbStore.getContacts();
+    selectedIds.forEach(id => {
+      const c = all.find(item => item.id === id);
+      if (c) {
+        dbStore.updateContact({
+          ...c,
+          networkingStatus: newStatus,
+          history: [
+            {
+              id: "hist_" + Math.random().toString(36).substring(2, 9),
+              type: "category_changed",
+              label: `Statut mis à jour par action groupée : ${getStatusBadge(newStatus).label}`,
+              timestamp: new Date().toISOString()
+            },
+            ...(c.history || [])
+          ]
+        });
+      }
+    });
+    setContacts(dbStore.getContacts());
+    showToast(`${selectedIds.length} contact(s) mis à jour`, "success");
+    setSelectedIds([]);
+  };
+
+  // Batch Delete
+  const handleConfirmBatchDelete = () => {
+    if (selectedIds.length === 0) return;
+    selectedIds.forEach(id => {
+      dbStore.deleteContact(id);
+    });
+    setContacts(dbStore.getContacts());
+    showToast(`${selectedIds.length} contact(s) supprimé(s)`, "info");
+    setSelectedIds([]);
+    setIsBatchDeleteModalOpen(false);
+  };
+
+  // Batch Copy Emails
+  const handleBatchCopyEmails = () => {
+    const selectedContacts = contacts.filter(c => selectedIds.includes(c.id));
+    const emails = selectedContacts.map(c => c.email).filter(Boolean);
+    if (emails.length === 0) {
+      showToast("Aucun email disponible parmi les contacts sélectionnés", "error");
+      return;
+    }
+    navigator.clipboard.writeText(emails.join("; "));
+    showToast(`${emails.length} adresse(s) email copiée(s) dans le presse-papier`, "success");
+  };
+
+  // Batch Export CSV
+  const handleBatchExportCsv = () => {
+    const targetContacts = selectedIds.length > 0 
+      ? contacts.filter(c => selectedIds.includes(c.id))
+      : filteredContacts;
+
+    if (targetContacts.length === 0) {
+      showToast("Aucun contact à exporter", "error");
+      return;
+    }
+
+    const headers = ["Nom Complet", "Prénom", "Nom", "Poste", "Entreprise", "Email", "Téléphone", "LinkedIn", "Catégorie", "Statut", "Score Pertinence", "Date d'ajout"];
+    const rows = targetContacts.map(c => [
+      `"${c.fullName.replace(/"/g, '""')}"`,
+      `"${(c.firstName || "").replace(/"/g, '""')}"`,
+      `"${(c.lastName || "").replace(/"/g, '""')}"`,
+      `"${(c.jobTitle || "").replace(/"/g, '""')}"`,
+      `"${(c.companyName || "").replace(/"/g, '""')}"`,
+      `"${(c.email || "").replace(/"/g, '""')}"`,
+      `"${(c.phone || "").replace(/"/g, '""')}"`,
+      `"${(c.linkedInUrl || "").replace(/"/g, '""')}"`,
+      `"${(c.category || "").replace(/"/g, '""')}"`,
+      `"${(c.networkingStatus || "to_contact").replace(/"/g, '""')}"`,
+      c.relevanceScore || 0,
+      `"${new Date(c.createdAt).toLocaleDateString("fr-FR")}"`
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `contacts_nacora_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast(`${targetContacts.length} contact(s) exporté(s) au format CSV`, "success");
+  };
+
+  // Close menus on outside click
+  useEffect(() => {
+    const handleOutsideClick = () => setOpenActionMenuId(null);
+    if (openActionMenuId) {
+      window.addEventListener("click", handleOutsideClick);
+    }
+    return () => window.removeEventListener("click", handleOutsideClick);
+  }, [openActionMenuId]);
+
+  // If a contact is selected, display the full-width workspace
   if (selectedContact) {
     return (
       <div className="relative z-10 w-full">
@@ -526,114 +794,152 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
     );
   }
 
+  const isAllVisibleSelected = filteredContacts.length > 0 && selectedIds.length === filteredContacts.length;
+  const isIndeterminateSelection = selectedIds.length > 0 && selectedIds.length < filteredContacts.length;
+
   return (
-    <div className="relative z-10 w-full space-y-5">
+    <div className="relative z-10 w-full space-y-6 pb-24">
       
       {/* ========================================================================= */}
-      {/* 1. HEADER SECTION                                                         */}
+      {/* 1. HEADER                                                                 */}
       {/* ========================================================================= */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-extrabold text-[#F5F6FA] tracking-tight font-display whitespace-nowrap">
-            {t.contacts.title}
-          </h1>
-          <p className="text-[#9AA0B2] text-xs sm:text-sm mt-0.5">
-            {t.contacts.subtitle}
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#F5F6FA] tracking-tight font-display">
+              {t.contacts.title}
+            </h1>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-white/[0.04] text-[#9AA0B2] border border-white/10 font-mono tabular-nums">
+              {totalCount}
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-[#9AA0B2] mt-0.5">
+            {language === "en" 
+              ? "Professional directory, recruiters, alumni and industry decision makers." 
+              : "Répertoire intelligent de vos relations professionnelles, recruteurs, alumni et décideurs."}
           </p>
         </div>
+
+        {/* Action buttons */}
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           <GlassButton 
-            variant="secondary" 
-            size="md"
+            variant="ghost" 
+            size="sm"
+            onClick={() => setIsConversationImportModalOpen(true)}
+            icon={<MessageSquare className="w-3.5 h-3.5 text-[#C084FC]" />}
+          >
+            {language === "en" ? "Import discussions" : "Importer discussions"}
+          </GlassButton>
+          
+          <GlassButton 
+            variant="ghost" 
+            size="sm"
             onClick={() => setIsTextImportModalOpen(true)}
             icon={<Sparkles className="w-3.5 h-3.5 text-[#FF6685]" />}
           >
-            {language === "en" ? "Import from text" : "Importer par texte"}
+            {language === "en" ? "Text import" : "Importer texte"}
           </GlassButton>
+          
           <button 
             type="button"
             onClick={() => setIsImportModalOpen(true)}
-            className="px-3.5 py-2 rounded-xl bg-[#0A66C2] hover:bg-[#004182] text-white font-semibold text-xs transition-all flex items-center gap-2 border border-[#0A66C2]/60 shadow-[0_4px_14px_rgba(10,102,194,0.35)] hover:shadow-[0_6px_20px_rgba(10,102,194,0.5)] hover:-translate-y-0.5 cursor-pointer shrink-0"
+            className="h-8 px-3 rounded-xl bg-[#0A66C2]/15 hover:bg-[#0A66C2]/25 text-[#38BDF8] font-semibold text-xs transition-all flex items-center gap-1.5 border border-[#0A66C2]/30 shadow-[0_2px_8px_rgba(10,102,194,0.15)] cursor-pointer shrink-0"
             title="Importer vos relations LinkedIn (.csv)"
           >
-            <Linkedin className="w-3.5 h-3.5 fill-current text-white shrink-0" />
-            <span>{t.contacts.importLinkedin}</span>
+            <Linkedin className="w-3.5 h-3.5 fill-current shrink-0" />
+            <span>LinkedIn (.csv)</span>
           </button>
+
           <GlassButton 
             variant="primary" 
-            size="md"
+            size="sm"
             onClick={() => setIsAddModalOpen(true)}
             icon={<Plus className="w-3.5 h-3.5 text-white" />}
           >
-            {t.contacts.addContact}
+            {language === "en" ? "Add contact" : "Ajouter un contact"}
           </GlassButton>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* 2. STATS BANNER (Liquid Glass iOS 27)                                     */}
+      {/* 2. SOBER STATS CARDS (Real Data Only)                                     */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.02] backdrop-blur-md border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.32),inset_0_1px_1px_rgba(255,255,255,0.16)] hover:bg-white/[0.04] hover:border-white/20 transition-all duration-300 flex flex-col justify-between group">
-          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/25 to-transparent pointer-events-none" />
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {/* Total contacts */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.025] backdrop-blur-xl border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.25)] flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">{t.contacts.totalContacts}</span>
-            <Users className="w-3.5 h-3.5 text-[#9AA0B2] group-hover:text-[#F5F6FA] transition-colors" />
+            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">Total Contacts</span>
+            <Users className="w-3.5 h-3.5 text-[#9AA0B2]" />
           </div>
-          <span className="text-2xl font-extrabold text-[#F5F6FA] font-display mt-2">{totalCount}</span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-[#F5F6FA] font-mono tabular-nums">{totalCount}</span>
+            <span className="text-[11px] text-[#9AA0B2]">enregistrés</span>
+          </div>
         </div>
 
-        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.02] backdrop-blur-md border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.32),inset_0_1px_1px_rgba(255,255,255,0.16)] hover:bg-white/[0.04] hover:border-[rgba(56,189,248,0.3)] transition-all duration-300 flex flex-col justify-between group">
-          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(56,189,248,0.4)] to-transparent pointer-events-none" />
+        {/* Contacts actifs */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.025] backdrop-blur-xl border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.25)] flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">{t.contacts.alumni}</span>
-            <GraduationCap className="w-3.5 h-3.5 text-[#38BDF8] transition-colors" />
+            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">Contacts Actifs</span>
+            <TrendingUp className="w-3.5 h-3.5 text-[#34D399]" />
           </div>
-          <span className="text-2xl font-extrabold text-[#38BDF8] font-display mt-2">{alumniCount}</span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-[#34D399] font-mono tabular-nums">{activeCount}</span>
+            <span className="text-[11px] text-[#9AA0B2]">en cours</span>
+          </div>
         </div>
 
-        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.02] backdrop-blur-md border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.32),inset_0_1px_1px_rgba(255,255,255,0.16)] hover:bg-white/[0.04] hover:border-[rgba(18,183,106,0.3)] transition-all duration-300 flex flex-col justify-between group">
-          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(18,183,106,0.4)] to-transparent pointer-events-none" />
+        {/* Entreprises */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.025] backdrop-blur-xl border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.25)] flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">{t.contacts.recruiters}</span>
-            <UserCheck className="w-3.5 h-3.5 text-[#34D399] transition-colors" />
+            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">Entreprises</span>
+            <Building2 className="w-3.5 h-3.5 text-[#38BDF8]" />
           </div>
-          <span className="text-2xl font-extrabold text-[#34D399] font-display mt-2">{recruiterCount}</span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-[#38BDF8] font-mono tabular-nums">{uniqueCompaniesCount}</span>
+            <span className="text-[11px] text-[#9AA0B2]">représentées</span>
+          </div>
         </div>
 
-        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.02] backdrop-blur-md border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.32),inset_0_1px_1px_rgba(255,255,255,0.16)] hover:bg-white/[0.04] hover:border-[rgba(216,26,69,0.3)] transition-all duration-300 flex flex-col justify-between group">
-          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(216,26,69,0.4)] to-transparent pointer-events-none" />
+        {/* Réseau Alumni & RH */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.025] backdrop-blur-xl border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.25)] flex flex-col justify-between">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">{language === "en" ? "Sector Pros" : "Pro Secteur Cible"}</span>
-            <Briefcase className="w-3.5 h-3.5 text-[#FF6685] transition-colors" />
+            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">Alumni & RH</span>
+            <GraduationCap className="w-3.5 h-3.5 text-[#FF6685]" />
           </div>
-          <span className="text-2xl font-extrabold text-[#FF6685] font-display mt-2">{sectorProCount}</span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-[#FF6685] font-mono tabular-nums">{alumniCount + recruiterCount}</span>
+            <span className="text-[11px] text-[#9AA0B2]">stratégiques</span>
+          </div>
         </div>
 
-        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.02] backdrop-blur-md border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.32),inset_0_1px_1px_rgba(255,255,255,0.16)] hover:bg-white/[0.04] hover:border-[rgba(192,132,252,0.3)] transition-all duration-300 flex flex-col justify-between col-span-2 sm:col-span-1 group">
-          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-[rgba(192,132,252,0.4)] to-transparent pointer-events-none" />
+        {/* Liés aux offres */}
+        <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.025] backdrop-blur-xl border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.25)] flex flex-col justify-between col-span-2 lg:col-span-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">{language === "en" ? "Linked to Jobs" : "Liés à des Offres"}</span>
-            <LinkIcon className="w-3.5 h-3.5 text-[#C084FC] transition-colors" />
+            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase tracking-wider">Liés aux Offres</span>
+            <LinkIcon className="w-3.5 h-3.5 text-[#C084FC]" />
           </div>
-          <span className="text-2xl font-extrabold text-[#C084FC] font-display mt-2">{linkedOppCount}</span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-2xl font-bold text-[#C084FC] font-mono tabular-nums">{linkedOppCount}</span>
+            <span className="text-[11px] text-[#9AA0B2]">opportunités</span>
+          </div>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* 3. FILTERS, SEARCH & SORT BAR (Liquid Glass iOS 27)                       */}
+      {/* 3. SEARCH, QUICK TABS & FILTERS BAR                                       */}
       {/* ========================================================================= */}
-      <div className="relative overflow-hidden p-4 rounded-2xl bg-white/[0.035] backdrop-blur-2xl border border-white/10 shadow-[0_12px_32px_rgba(0,0,0,0.35),inset_0_1px_1px_rgba(255,255,255,0.18)] space-y-3.5">
-        <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent pointer-events-none" />
-
+      <div className="p-4 rounded-2xl bg-white/[0.03] backdrop-blur-2xl border border-white/10 space-y-3.5 shadow-[0_8px_32px_rgba(0,0,0,0.28)]">
+        
         {/* Top search & controls row */}
         <div className="flex flex-col lg:flex-row gap-3 items-center justify-between">
-          {/* Search input with dynamic result count */}
+          
+          {/* Main search bar */}
           <div className="relative flex-1 w-full">
             <Search className="w-4 h-4 text-[#9AA0B2] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
-              placeholder={language === "en" ? "Search by name, title, company, university, skills..." : "Rechercher par nom, poste, entreprise, école, compétences..."}
+              placeholder="Rechercher un contact, une entreprise, un poste..."
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
               className="glass-input pl-10 pr-24 py-2.5 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60 w-full rounded-xl"
@@ -644,67 +950,88 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
                   type="button"
                   onClick={() => setLocalSearch("")}
                   className="text-[#9AA0B2] hover:text-[#F5F6FA] cursor-pointer p-0.5"
-                  title={language === "en" ? "Clear search" : "Effacer la recherche"}
+                  title="Effacer la recherche"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
-              <span className="text-[10px] text-[#9AA0B2] font-semibold bg-white/[0.05] px-2 py-0.5 rounded-lg border border-white/10 whitespace-nowrap backdrop-blur-sm">
+              <span className="text-[11px] text-[#9AA0B2] font-mono tabular-nums px-2 py-0.5 rounded-lg bg-white/[0.04] border border-white/10">
                 {filteredContacts.length} / {totalCount}
               </span>
             </div>
           </div>
 
-          {/* Right controls: Advanced filters toggle + Sort Dropdown & Direction */}
+          {/* Right Action Controls: View Switch + Filters Drawer Toggle + Sort */}
           <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto shrink-0 justify-between lg:justify-end">
-            {/* Toggle Advanced Filters */}
+            
+            {/* View Mode Switcher */}
+            <div className="flex items-center p-0.5 rounded-xl bg-white/[0.04] border border-white/10">
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`p-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  viewMode === "list" 
+                    ? "bg-white/[0.12] text-[#F5F6FA] shadow-sm" 
+                    : "text-[#9AA0B2] hover:text-[#F5F6FA]"
+                }`}
+                title="Vue Liste CRM"
+              >
+                <LayoutList className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("grid")}
+                className={`p-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  viewMode === "grid" 
+                    ? "bg-white/[0.12] text-[#F5F6FA] shadow-sm" 
+                    : "text-[#9AA0B2] hover:text-[#F5F6FA]"
+                }`}
+                title="Vue Cartes"
+              >
+                <LayoutGrid className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Advanced Filters Button */}
             <button
               type="button"
               onClick={() => setShowAdvancedFilters(prev => !prev)}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border cursor-pointer backdrop-blur-xl ${
+              className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all border cursor-pointer ${
                 showAdvancedFilters || activeAdvancedFilterCount > 0
-                  ? "bg-[rgba(216,26,69,0.15)] text-[#FF6685] border-[rgba(216,26,69,0.30)] shadow-[0_0_14px_rgba(216,26,69,0.15),inset_0_1px_1px_rgba(255,255,255,0.2)]"
-                  : "bg-white/[0.04] hover:bg-white/[0.08] text-[#F5F6FA] border-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]"
+                  ? "bg-[rgba(216,26,69,0.15)] text-[#FF6685] border-[rgba(216,26,69,0.30)]"
+                  : "bg-white/[0.04] hover:bg-white/[0.08] text-[#F5F6FA] border-white/10"
               }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>{language === "en" ? "Advanced Filters" : "Filtres avancés"}</span>
+              <span>Filtres</span>
               {activeAdvancedFilterCount > 0 && (
-                <span className="bg-[#D81A45] text-white text-[10px] font-extrabold px-1.5 py-0.2 rounded-full ml-0.5">
+                <span className="bg-[#D81A45] text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full font-mono">
                   {activeAdvancedFilterCount}
                 </span>
               )}
             </button>
 
             {/* Sort Selector with Direction Toggle */}
-            <div className="flex items-center gap-1.5 bg-white/[0.03] p-1 rounded-xl border border-white/10 backdrop-blur-xl shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
-              <span className="text-[11px] text-[#9AA0B2] font-semibold pl-2 pr-1 hidden sm:inline-block">
-                {language === "en" ? "Sort:" : "Trier :"}
-              </span>
+            <div className="flex items-center gap-1 bg-white/[0.04] p-1 rounded-xl border border-white/10">
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as ContactSortOption)}
                 className="bg-transparent text-xs text-[#F5F6FA] py-1 px-2 border-none focus:outline-none cursor-pointer"
-                title={language === "en" ? "Sort criterion" : "Critère de tri"}
+                title="Critère de tri"
               >
-                <option value="relevance" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "AI Relevance" : "Pertinence IA"}</option>
-                <option value="name" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Name" : "Nom complet"}</option>
-                <option value="company" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Company" : "Entreprise"}</option>
-                <option value="job" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Job title" : "Intitulé de poste"}</option>
-                <option value="recent" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Date added" : "Date d'ajout"}</option>
-                <option value="status" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Networking status" : "Statut de contact"}</option>
+                <option value="relevance" className="bg-[#0B0F19] text-[#F5F6FA]">Pertinence IA</option>
+                <option value="name" className="bg-[#0B0F19] text-[#F5F6FA]">Nom complet</option>
+                <option value="company" className="bg-[#0B0F19] text-[#F5F6FA]">Entreprise</option>
+                <option value="job" className="bg-[#0B0F19] text-[#F5F6FA]">Poste</option>
+                <option value="recent" className="bg-[#0B0F19] text-[#F5F6FA]">Date d'ajout</option>
+                <option value="status" className="bg-[#0B0F19] text-[#F5F6FA]">Statut relationnel</option>
               </select>
 
-              {/* Direction button */}
               <button
                 type="button"
                 onClick={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}
-                className="p-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] text-[#F5F6FA] transition-colors border border-white/10 cursor-pointer"
-                title={
-                  sortOrder === "desc" 
-                    ? (language === "en" ? "Order: Descending (click to switch)" : "Ordre : Décroissant (cliquez pour inverser)") 
-                    : (language === "en" ? "Order: Ascending (click to switch)" : "Ordre : Croissant (cliquez pour inverser)")
-                }
+                className="p-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-[#F5F6FA] transition-colors border border-white/5 cursor-pointer"
+                title={sortOrder === "desc" ? "Ordre Décroissant" : "Ordre Croissant"}
               >
                 {sortOrder === "desc" ? (
                   <ArrowDown className="w-3.5 h-3.5 text-[#FF6685]" />
@@ -714,152 +1041,55 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
               </button>
             </div>
 
-            {/* Reset all filters button if any active */}
+            {/* Reset Button */}
             {hasAnyFilterActive && (
               <button
                 type="button"
                 onClick={handleResetFilters}
                 className="px-2.5 py-2 rounded-xl text-xs font-semibold text-[#9AA0B2] hover:text-[#FF6685] hover:bg-white/[0.04] transition-colors flex items-center gap-1 cursor-pointer"
-                title={language === "en" ? "Reset all search criteria" : "Réinitialiser tous les filtres"}
+                title="Réinitialiser tous les filtres"
               >
                 <RotateCcw className="w-3 h-3" />
-                <span className="hidden sm:inline">{language === "en" ? "Reset" : "Effacer"}</span>
+                <span className="hidden sm:inline">Effacer</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Major Category Pills + Quick Sort Pills */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1 border-t border-white/5">
-          {/* Categories with Color Coded Liquid Glass Active States */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none flex-nowrap">
-            {[
-              { 
-                id: "all", 
-                label: language === "en" ? `All (${totalCount})` : `Tous (${totalCount})`,
-                activeColor: "bg-white/[0.10] text-[#F5F6FA] border-white/25 shadow-[0_0_12px_rgba(255,255,255,0.08)]"
-              },
-              { 
-                id: "alumni", 
-                label: `Alumni (${alumniCount})`,
-                activeColor: "bg-[rgba(56,189,248,0.15)] text-[#38BDF8] border-[rgba(56,189,248,0.32)] shadow-[0_0_12px_rgba(56,189,248,0.15)]"
-              },
-              { 
-                id: "recruiter", 
-                label: language === "en" ? `Recruiters RH (${recruiterCount})` : `Recruteurs RH (${recruiterCount})`,
-                activeColor: "bg-[rgba(18,183,106,0.15)] text-[#34D399] border-[rgba(18,183,106,0.32)] shadow-[0_0_12px_rgba(18,183,106,0.15)]"
-              },
-              { 
-                id: "sector_pro", 
-                label: language === "en" ? `Sector Pros (${sectorProCount})` : `Pro Secteur (${sectorProCount})`,
-                activeColor: "bg-[rgba(216,26,69,0.15)] text-[#FF6685] border-[rgba(216,26,69,0.32)] shadow-[0_0_12px_rgba(216,26,69,0.15)]"
-              },
-              { 
-                id: "student", 
-                label: language === "en" ? `Students (${studentCount})` : `Étudiants (${studentCount})`,
-                activeColor: "bg-[rgba(192,132,252,0.15)] text-[#C084FC] border-[rgba(192,132,252,0.32)] shadow-[0_0_12px_rgba(192,132,252,0.15)]"
-              },
-              { 
-                id: "other_pro", 
-                label: language === "en" ? "Other Pros" : "Autres Pro",
-                activeColor: "bg-[rgba(247,144,9,0.15)] text-[#FBBF24] border-[rgba(247,144,9,0.32)] shadow-[0_0_12px_rgba(247,144,9,0.15)]"
-              },
-            ].map((item) => {
-              const isActive = categoryFilter === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setCategoryFilter(item.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border cursor-pointer backdrop-blur-xl ${
-                    isActive
-                      ? `${item.activeColor} shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]`
-                      : "bg-white/[0.03] hover:bg-white/[0.07] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Quick Sort Shortcuts */}
-          <div className="flex items-center gap-1 shrink-0 overflow-x-auto scrollbar-none py-0.5">
-            <span className="text-[10px] uppercase font-bold text-[#9AA0B2]/70 mr-1 hidden md:inline">
-              {language === "en" ? "Quick sort:" : "Tri rapide :"}
-            </span>
-            <button
-              type="button"
-              onClick={() => handleQuickSort("relevance")}
-              className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold flex items-center gap-1 border transition-all cursor-pointer backdrop-blur-xl ${
-                sortBy === "relevance"
-                  ? "bg-[rgba(216,26,69,0.16)] text-[#FF6685] border-[rgba(216,26,69,0.32)] shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]"
-                  : "bg-white/[0.03] hover:bg-white/[0.07] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/10"
-              }`}
-            >
-              <Sparkles className="w-3 h-3 text-[#FF6685]" />
-              <span>Pertinence</span>
-              {sortBy === "relevance" && (
-                <span className="text-[9px] font-bold">{sortOrder === "desc" ? "↓" : "↑"}</span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickSort("name")}
-              className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold flex items-center gap-1 border transition-all cursor-pointer backdrop-blur-xl ${
-                sortBy === "name"
-                  ? "bg-white/[0.09] text-[#F5F6FA] border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
-                  : "bg-white/[0.03] hover:bg-white/[0.07] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/10"
-              }`}
-            >
-              <span>Nom</span>
-              {sortBy === "name" ? (
-                <span className="text-[9px] font-bold">{sortOrder === "asc" ? "A-Z" : "Z-A"}</span>
-              ) : (
-                <span className="text-[9px] text-[#9AA0B2]">A-Z</span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickSort("company")}
-              className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold flex items-center gap-1 border transition-all cursor-pointer backdrop-blur-xl ${
-                sortBy === "company"
-                  ? "bg-white/[0.09] text-[#F5F6FA] border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
-                  : "bg-white/[0.03] hover:bg-white/[0.07] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/10"
-              }`}
-            >
-              <Building2 className="w-3 h-3" />
-              <span>Entreprise</span>
-              {sortBy === "company" && (
-                <span className="text-[9px] font-bold">{sortOrder === "asc" ? "A-Z" : "Z-A"}</span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickSort("recent")}
-              className={`px-2.5 py-1 rounded-xl text-[11px] font-semibold flex items-center gap-1 border transition-all cursor-pointer backdrop-blur-xl ${
-                sortBy === "recent"
-                  ? "bg-white/[0.09] text-[#F5F6FA] border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
-                  : "bg-white/[0.03] hover:bg-white/[0.07] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/10"
-              }`}
-            >
-              <span>Récents</span>
-              {sortBy === "recent" && (
-                <span className="text-[9px] font-bold">{sortOrder === "desc" ? "↓" : "↑"}</span>
-              )}
-            </button>
-          </div>
+        {/* Category Segmented Controls (Buttons, interactive) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none flex-nowrap pt-1 border-t border-white/5">
+          {[
+            { id: "all", label: `Tous (${totalCount})` },
+            { id: "alumni", label: `Alumni (${alumniCount})` },
+            { id: "recruiter", label: `Recruteurs RH (${recruiterCount})` },
+            { id: "sector_pro", label: `Pro Secteur (${sectorProCount})` },
+            { id: "student", label: `Étudiants (${studentCount})` },
+            { id: "other_pro", label: "Autres Pro" }
+          ].map((item) => {
+            const isActive = categoryFilter === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setCategoryFilter(item.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-all border cursor-pointer ${
+                  isActive
+                    ? "bg-white/[0.12] text-[#F5F6FA] border-white/20 shadow-sm"
+                    : "bg-white/[0.02] hover:bg-white/[0.06] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/5"
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Collapsible Advanced Filters Drawer */}
+        {/* Collapsible Advanced Filters Panel */}
         {showAdvancedFilters && (
-          <div className="pt-3 border-t border-white/10 space-y-3.5 bg-black/20 p-3.5 rounded-xl">
+          <div className="pt-3 border-t border-white/10 space-y-3 bg-black/20 p-3.5 rounded-xl">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-[#F5F6FA] uppercase tracking-wider flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5 text-[#FF6685]" />
-                {language === "en" ? "Refine candidate & contact search" : "Affiner la recherche de personnes"}
+                Filtres Avancés
               </span>
               <button
                 type="button"
@@ -867,68 +1097,25 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
                 className="text-[11px] text-[#9AA0B2] hover:text-[#F5F6FA] flex items-center gap-1 cursor-pointer"
               >
                 <X className="w-3 h-3" />
-                <span>{language === "en" ? "Close" : "Fermer"}</span>
+                <span>Fermer</span>
               </button>
             </div>
 
-            {/* Dropdown filters grid */}
+            {/* Filter grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* 1. Function / Domain */}
+              {/* 1. Entreprise */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] font-semibold text-[#9AA0B2] flex items-center gap-1">
-                  <Briefcase className="w-3 h-3 text-[#9AA0B2]" />
-                  <span>{language === "en" ? "Role & Function" : "Métier & Fonction"}</span>
-                </label>
-                <select
-                  value={functionFilter}
-                  onChange={(e) => setFunctionFilter(e.target.value)}
-                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer"
-                >
-                  {FUNCTION_FILTER_OPTIONS.map(opt => (
-                    <option key={opt.id} value={opt.id} className="bg-[#060812] text-[#F5F6FA]">
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 2. Seniority / Level */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] font-semibold text-[#9AA0B2] flex items-center gap-1">
-                  <UserCheck className="w-3 h-3 text-[#9AA0B2]" />
-                  <span>{language === "en" ? "Seniority Level" : "Niveau & Séniorité"}</span>
-                </label>
-                <select
-                  value={seniorityFilter}
-                  onChange={(e) => setSeniorityFilter(e.target.value)}
-                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer"
-                >
-                  {SENIORITY_FILTER_OPTIONS.map(opt => (
-                    <option key={opt.id} value={opt.id} className="bg-[#060812] text-[#F5F6FA]">
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* 3. Company */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] font-semibold text-[#9AA0B2] flex items-center gap-1">
-                  <Building2 className="w-3 h-3 text-[#9AA0B2]" />
-                  <span>{language === "en" ? "Company" : "Entreprise"}</span>
-                </label>
+                <label className="text-[11px] font-semibold text-[#9AA0B2]">Entreprise</label>
                 <select
                   value={companyFilter}
                   onChange={(e) => setCompanyFilter(e.target.value)}
-                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer"
+                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19] cursor-pointer"
                 >
-                  <option value="all" className="bg-[#060812] text-[#F5F6FA]">
-                    {language === "en" ? "All companies" : "Toutes les entreprises"}
-                  </option>
+                  <option value="all">Toutes les entreprises ({companyOptions.length})</option>
                   {companyOptions.map((co) => {
                     const coCount = contacts.filter(c => c.companyName.toLowerCase() === co.toLowerCase()).length;
                     return (
-                      <option key={co} value={co} className="bg-[#060812] text-[#F5F6FA]">
+                      <option key={co} value={co} className="bg-[#0B0F19] text-[#F5F6FA]">
                         {co} ({coCount})
                       </option>
                     );
@@ -936,41 +1123,68 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
                 </select>
               </div>
 
-              {/* 4. Networking Status */}
+              {/* 2. Métier & Fonction */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-[11px] font-semibold text-[#9AA0B2] flex items-center gap-1">
-                  <Target className="w-3 h-3 text-[#9AA0B2]" />
-                  <span>{language === "en" ? "Outreach Status" : "Statut relationnel"}</span>
-                </label>
+                <label className="text-[11px] font-semibold text-[#9AA0B2]">Métier & Fonction</label>
+                <select
+                  value={functionFilter}
+                  onChange={(e) => setFunctionFilter(e.target.value)}
+                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19] cursor-pointer"
+                >
+                  {FUNCTION_FILTER_OPTIONS.map(opt => (
+                    <option key={opt.id} value={opt.id} className="bg-[#0B0F19] text-[#F5F6FA]">
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 3. Séniorité */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-semibold text-[#9AA0B2]">Niveau & Séniorité</label>
+                <select
+                  value={seniorityFilter}
+                  onChange={(e) => setSeniorityFilter(e.target.value)}
+                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19] cursor-pointer"
+                >
+                  {SENIORITY_FILTER_OPTIONS.map(opt => (
+                    <option key={opt.id} value={opt.id} className="bg-[#0B0F19] text-[#F5F6FA]">
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 4. Statut Relationnel */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-semibold text-[#9AA0B2]">Statut de démarche</label>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
-                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer"
+                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19] cursor-pointer"
                 >
-                  <option value="all" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "All statuses" : "Tous les statuts"}</option>
-                  <option value="to_contact" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "To contact" : "À contacter"}</option>
-                  <option value="contacted" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Message sent" : "Message envoyé"}</option>
-                  <option value="exchanging" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "In discussion" : "Échange en cours"}</option>
-                  <option value="interview_done" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Interview held" : "Entretien réalisé"}</option>
-                  <option value="not_interested" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Closed / No reply" : "Sans suite"}</option>
+                  <option value="all">Tous les statuts</option>
+                  <option value="to_contact">À contacter</option>
+                  <option value="contacted">Message envoyé</option>
+                  <option value="exchanging">Échange en cours</option>
+                  <option value="interview_done">Entretien réalisé</option>
+                  <option value="not_interested">Sans suite</option>
                 </select>
               </div>
             </div>
 
-            {/* Second row: Score Pills + Academic network + Toggle channels */}
+            {/* Second row: Academic & Channels */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-white/5 items-center">
               {/* Score threshold */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold text-[#9AA0B2] block">
-                  {language === "en" ? "Minimum AI Relevance Score" : "Score de pertinence IA minimum"}
-                </label>
+                <label className="text-[11px] font-semibold text-[#9AA0B2] block">Score IA minimum</label>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {MIN_SCORE_OPTIONS.map(opt => (
                     <button
                       key={opt.value}
                       type="button"
                       onClick={() => setMinScoreFilter(opt.value)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
                         minScoreFilter === opt.value
                           ? "bg-[rgba(216,26,69,0.2)] text-[#FF6685] border-[rgba(216,26,69,0.4)]"
                           : "bg-white/[0.03] hover:bg-white/[0.08] text-[#9AA0B2] border-white/5"
@@ -984,17 +1198,14 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
 
               {/* Academic network */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold text-[#9AA0B2] flex items-center gap-1">
-                  <GraduationCap className="w-3 h-3 text-[#9AA0B2]" />
-                  <span>{language === "en" ? "Academic Network" : "Réseau Académique & Écoles"}</span>
-                </label>
+                <label className="text-[11px] font-semibold text-[#9AA0B2] block">Réseau Académique</label>
                 <select
                   value={academicFilter}
                   onChange={(e) => setAcademicFilter(e.target.value)}
-                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer w-full"
+                  className="glass-input px-3 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19] cursor-pointer w-full"
                 >
                   {ACADEMIC_FILTER_OPTIONS.map(opt => (
-                    <option key={opt.id} value={opt.id} className="bg-[#060812] text-[#F5F6FA]">
+                    <option key={opt.id} value={opt.id} className="bg-[#0B0F19] text-[#F5F6FA]">
                       {opt.label}
                     </option>
                   ))}
@@ -1003,43 +1214,54 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
 
               {/* Channels checkboxes */}
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold text-[#9AA0B2] block">
-                  {language === "en" ? "Required information" : "Données de contact disponibles"}
-                </label>
+                <label className="text-[11px] font-semibold text-[#9AA0B2] block">Coordonnées disponibles</label>
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
-                    onClick={() => setOnlyLinkedIn(prev => !prev)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer backdrop-blur-xl ${
-                      onlyLinkedIn
-                        ? "bg-white/[0.09] text-[#F5F6FA] border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
-                        : "bg-white/[0.03] text-[#9AA0B2] border-white/10 hover:bg-white/[0.07] hover:text-[#F5F6FA]"
-                    }`}
-                  >
-                    <Linkedin className="w-3.5 h-3.5 text-[#9AA0B2]" />
-                    <span>LinkedIn</span>
-                  </button>
-
-                  <button
-                    type="button"
                     onClick={() => setOnlyEmail(prev => !prev)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer backdrop-blur-xl ${
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${
                       onlyEmail
-                        ? "bg-white/[0.09] text-[#F5F6FA] border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
-                        : "bg-white/[0.03] text-[#9AA0B2] border-white/10 hover:bg-white/[0.07] hover:text-[#F5F6FA]"
+                        ? "bg-white/[0.12] text-[#F5F6FA] border-white/25"
+                        : "bg-white/[0.03] text-[#9AA0B2] border-white/5 hover:bg-white/[0.06]"
                     }`}
                   >
-                    <Mail className="w-3.5 h-3.5 text-[#9AA0B2]" />
+                    <Mail className="w-3.5 h-3.5" />
                     <span>Email</span>
                   </button>
 
                   <button
                     type="button"
+                    onClick={() => setOnlyPhone(prev => !prev)}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${
+                      onlyPhone
+                        ? "bg-white/[0.12] text-[#F5F6FA] border-white/25"
+                        : "bg-white/[0.03] text-[#9AA0B2] border-white/5 hover:bg-white/[0.06]"
+                    }`}
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    <span>Téléphone</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOnlyLinkedIn(prev => !prev)}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${
+                      onlyLinkedIn
+                        ? "bg-white/[0.12] text-[#F5F6FA] border-white/25"
+                        : "bg-white/[0.03] text-[#9AA0B2] border-white/5 hover:bg-white/[0.06]"
+                    }`}
+                  >
+                    <Linkedin className="w-3.5 h-3.5" />
+                    <span>LinkedIn</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={() => setOnlyOpportunityLinked(prev => !prev)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer backdrop-blur-xl ${
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all cursor-pointer ${
                       onlyOpportunityLinked
-                        ? "bg-[rgba(216,26,69,0.16)] text-[#FF6685] border-[rgba(216,26,69,0.32)] shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]"
-                        : "bg-white/[0.03] text-[#9AA0B2] border-white/10 hover:bg-white/[0.07] hover:text-[#F5F6FA]"
+                        ? "bg-[rgba(216,26,69,0.2)] text-[#FF6685] border-[rgba(216,26,69,0.35)]"
+                        : "bg-white/[0.03] text-[#9AA0B2] border-white/5 hover:bg-white/[0.06]"
                     }`}
                   >
                     <LinkIcon className="w-3.5 h-3.5 text-[#FF6685]" />
@@ -1051,15 +1273,13 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
           </div>
         )}
 
-        {/* Active Filters Badges Row */}
+        {/* Active Filters Summary */}
         {hasAnyFilterActive && (
-          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-white/5 text-xs">
-            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase mr-1">
-              {language === "en" ? "Active filters:" : "Filtres actifs :"}
-            </span>
-
+          <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-white/5 text-xs">
+            <span className="text-[11px] font-semibold text-[#9AA0B2] uppercase mr-1">Filtres actifs :</span>
+            
             {localSearch && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
+              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 text-[11px]">
                 <span>Recherche: "{localSearch}"</span>
                 <button onClick={() => setLocalSearch("")} className="text-[#9AA0B2] hover:text-[#FF6685] cursor-pointer">
                   <X className="w-3 h-3" />
@@ -1068,7 +1288,7 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
             )}
 
             {categoryFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-xl bg-[rgba(216,26,69,0.14)] border border-[rgba(216,26,69,0.28)] text-[#FF6685] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.18)]">
+              <span className="px-2.5 py-1 rounded-xl bg-[rgba(216,26,69,0.12)] border border-[rgba(216,26,69,0.25)] text-[#FF6685] flex items-center gap-1.5 text-[11px]">
                 <span>Catégorie: {categoryFilter}</span>
                 <button onClick={() => setCategoryFilter("all")} className="text-[#FF6685] hover:text-white cursor-pointer">
                   <X className="w-3 h-3" />
@@ -1076,8 +1296,17 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
               </span>
             )}
 
+            {companyFilter !== "all" && (
+              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 text-[11px]">
+                <span>Entreprise: {companyFilter}</span>
+                <button onClick={() => setCompanyFilter("all")} className="text-[#9AA0B2] hover:text-white cursor-pointer">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
             {functionFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
+              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 text-[11px]">
                 <span>Fonction: {FUNCTION_FILTER_OPTIONS.find(o => o.id === functionFilter)?.label}</span>
                 <button onClick={() => setFunctionFilter("all")} className="text-[#9AA0B2] hover:text-white cursor-pointer">
                   <X className="w-3 h-3" />
@@ -1085,44 +1314,17 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
               </span>
             )}
 
-            {seniorityFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
-                <span>Niveau: {SENIORITY_FILTER_OPTIONS.find(o => o.id === seniorityFilter)?.label}</span>
-                <button onClick={() => setSeniorityFilter("all")} className="text-[#9AA0B2] hover:text-white cursor-pointer">
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            )}
-
-            {companyFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
-                <span>Entreprise: {companyFilter}</span>
-                <button onClick={() => setCompanyFilter("all")} className="text-[#9AA0B2] hover:text-[#FF6685] cursor-pointer">
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            )}
-
             {statusFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
-                <span>Statut: {statusFilter}</span>
+              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 text-[11px]">
+                <span>Statut: {getStatusBadge(statusFilter as ContactNetworkingStatus).label}</span>
                 <button onClick={() => setStatusFilter("all")} className="text-[#9AA0B2] hover:text-white cursor-pointer">
                   <X className="w-3 h-3" />
                 </button>
               </span>
             )}
 
-            {academicFilter !== "all" && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
-                <span>Académique: {ACADEMIC_FILTER_OPTIONS.find(o => o.id === academicFilter)?.label}</span>
-                <button onClick={() => setAcademicFilter("all")} className="text-[#9AA0B2] hover:text-white cursor-pointer">
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            )}
-
             {minScoreFilter > 0 && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
+              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 text-[11px]">
                 <span>Score ≥ {minScoreFilter}%</span>
                 <button onClick={() => setMinScoreFilter(0)} className="text-[#9AA0B2] hover:text-white cursor-pointer">
                   <X className="w-3 h-3" />
@@ -1130,17 +1332,8 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
               </span>
             )}
 
-            {onlyLinkedIn && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
-                <span>LinkedIn uniquement</span>
-                <button onClick={() => setOnlyLinkedIn(false)} className="text-[#9AA0B2] hover:text-white cursor-pointer">
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            )}
-
             {onlyEmail && (
-              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/12 text-[#F5F6FA] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]">
+              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 text-[11px]">
                 <span>Email uniquement</span>
                 <button onClick={() => setOnlyEmail(false)} className="text-[#9AA0B2] hover:text-white cursor-pointer">
                   <X className="w-3 h-3" />
@@ -1148,10 +1341,19 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
               </span>
             )}
 
-            {onlyOpportunityLinked && (
-              <span className="px-2.5 py-1 rounded-xl bg-[rgba(216,26,69,0.14)] border border-[rgba(216,26,69,0.28)] text-[#FF6685] flex items-center gap-1.5 text-[11px] backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.18)]">
-                <span>Offre liée</span>
-                <button onClick={() => setOnlyOpportunityLinked(false)} className="text-[#FF6685] hover:text-white cursor-pointer">
+            {onlyPhone && (
+              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 text-[11px]">
+                <span>Téléphone uniquement</span>
+                <button onClick={() => setOnlyPhone(false)} className="text-[#9AA0B2] hover:text-white cursor-pointer">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
+            {onlyLinkedIn && (
+              <span className="px-2.5 py-1 rounded-xl bg-white/[0.05] border border-white/10 text-[#F5F6FA] flex items-center gap-1.5 text-[11px]">
+                <span>LinkedIn uniquement</span>
+                <button onClick={() => setOnlyLinkedIn(false)} className="text-[#9AA0B2] hover:text-white cursor-pointer">
                   <X className="w-3 h-3" />
                 </button>
               </span>
@@ -1162,203 +1364,519 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
               onClick={handleResetFilters}
               className="text-[11px] text-[#FF6685] hover:underline font-semibold ml-auto cursor-pointer"
             >
-              {language === "en" ? "Clear all" : "Tout effacer"}
+              Tout effacer
             </button>
           </div>
         )}
       </div>
 
       {/* ========================================================================= */}
-      {/* 4. CONTACTS GRID                                                          */}
+      {/* 4. CONTACTS LIST / GRID PRESENTATION                                      */}
       {/* ========================================================================= */}
       {filteredContacts.length === 0 ? (
-        <div className="p-12 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-3">
-          <Users className="w-10 h-10 text-[#9AA0B2] mx-auto opacity-50" />
-          <h3 className="text-base font-bold text-[#F5F6FA] font-display">{t.contacts.noContacts}</h3>
-          <p className="text-xs text-[#9AA0B2] max-w-md mx-auto">
-            {hasAnyFilterActive
-              ? (language === "en" ? "No contacts match your current filters. Clear your filters to see more." : "Aucun contact ne correspond à vos filtres actuels. Réinitialisez vos critères de recherche.")
-              : (language === "en" ? "Your contacts list is empty. Import from LinkedIn or add a contact manually." : "Votre carnet de contacts est actuellement vide. Importez vos relations LinkedIn ou ajoutez un contact manuellement.")}
-          </p>
-          {hasAnyFilterActive && (
-            <button
-              onClick={handleResetFilters}
-              className="text-xs text-[#FF6685] hover:underline font-semibold cursor-pointer"
-            >
-              {language === "en" ? "Reset filters" : "Réinitialiser les filtres"}
-            </button>
-          )}
+        <div className="p-12 rounded-2xl bg-white/[0.02] border border-white/10 text-center space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center mx-auto text-[#9AA0B2]">
+            <Users className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-[#F5F6FA] font-display">
+              {hasAnyFilterActive ? "Aucun contact ne correspond à votre recherche" : "Vous n'avez encore aucun contact"}
+            </h3>
+            <p className="text-xs text-[#9AA0B2] max-w-md mx-auto">
+              {hasAnyFilterActive
+                ? "Essayez de modifier vos critères de recherche ou réinitialisez les filtres."
+                : "Commencez à bâtir votre carnet de relations professionnelles en ajoutant un contact ou en important votre réseau LinkedIn."}
+            </p>
+          </div>
+          
+          <div className="flex items-center justify-center gap-2 pt-2">
+            {hasAnyFilterActive ? (
+              <GlassButton variant="secondary" size="sm" onClick={handleResetFilters}>
+                Réinitialiser les filtres
+              </GlassButton>
+            ) : (
+              <>
+                <GlassButton variant="primary" size="md" onClick={() => setIsAddModalOpen(true)} icon={<Plus className="w-4 h-4" />}>
+                  Ajouter un contact
+                </GlassButton>
+                <GlassButton variant="secondary" size="md" onClick={() => setIsImportModalOpen(true)} icon={<Linkedin className="w-4 h-4 text-[#38BDF8]" />}>
+                  Importer LinkedIn
+                </GlassButton>
+              </>
+            )}
+          </div>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredContacts.map(contact => (
-            <GlassCard
-              key={contact.id}
-              onClick={() => setSelectedContact(contact)}
-              className="relative overflow-hidden p-5 flex flex-col justify-between group transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:shadow-[0_16px_36px_rgba(0,0,0,0.45),inset_0_1px_1px_rgba(255,255,255,0.22)]"
-              hoverable
-            >
-              {/* Top specular reflection line - subtle rim highlight */}
-              <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/30 to-transparent pointer-events-none opacity-60 group-hover:opacity-100 transition-opacity" />
+      ) : viewMode === "list" ? (
+        /* ========================================================================= */
+        /* 4A. REFINED HIGH-DENSITY LIST VIEW (Modern SaaS CRM)                      */
+        /* ========================================================================= */
+        <div className="rounded-2xl bg-white/[0.025] border border-white/10 overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.28)]">
+          {/* List Header Bar */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-white/[0.02] text-xs font-semibold text-[#9AA0B2]">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleSelectAllVisible}
+                className="text-[#9AA0B2] hover:text-[#F5F6FA] cursor-pointer"
+                title={isAllVisibleSelected ? "Tout désélectionner" : "Tout sélectionner"}
+              >
+                {isAllVisibleSelected ? (
+                  <CheckSquare className="w-4 h-4 text-[#FF6685]" />
+                ) : isIndeterminateSelection ? (
+                  <div className="w-4 h-4 rounded border border-[#FF6685] bg-[rgba(216,26,69,0.2)] flex items-center justify-center">
+                    <div className="w-2 h-0.5 bg-[#FF6685]" />
+                  </div>
+                ) : (
+                  <Square className="w-4 h-4" />
+                )}
+              </button>
+              <span>Contact & Entreprise</span>
+            </div>
 
-              <div className="space-y-3 relative z-10">
-                {/* Top Badge Row: Color-Coded Category Badges + AI Relevance Score */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-1 min-w-0">
-                    {contact.categories && contact.categories.length > 0 ? (
-                      <>
-                        {contact.categories.slice(0, 2).map((cat, idx) => {
-                          const style = getCategoryBadgeStyle(cat.category, cat.subcategory);
-                          return (
-                            <span 
-                              key={idx} 
-                              title={`${cat.reason || style.label} (Confiance : ${cat.confidence === 'high' ? 'Haute' : cat.confidence === 'medium' ? 'Moyenne' : 'Basse'})`}
-                              className={`px-2.5 py-0.5 rounded-lg border text-[10px] font-semibold backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] flex items-center gap-1 ${style.bgColor} ${style.textColor} ${style.borderColor}`}
-                            >
-                              <span>{style.label}</span>
-                            </span>
-                          );
-                        })}
-                        {contact.categories.length > 2 && (
-                          <span className="text-[10px] text-[#9AA0B2] bg-white/[0.04] px-1.5 py-0.5 rounded-lg border border-white/10 font-semibold backdrop-blur-sm">
-                            +{contact.categories.length - 2}
+            <div className="hidden md:flex items-center gap-8">
+              <span className="w-36">Coordonnées</span>
+              <span className="w-28 text-center">Score & Catégorie</span>
+              <span className="w-28 text-right">Statut</span>
+              <span className="w-16 text-right">Actions</span>
+            </div>
+          </div>
+
+          {/* List Rows */}
+          <div className="divide-y divide-white/5">
+            {filteredContacts.map(contact => {
+              const isSelected = selectedIds.includes(contact.id);
+              const statusCfg = getStatusBadge(contact.networkingStatus);
+              const initials = getInitials(contact.fullName);
+              const avatarStyle = getAvatarGradient(contact.fullName);
+
+              return (
+                <div
+                  key={contact.id}
+                  onClick={() => setSelectedContact(contact)}
+                  className={`flex flex-col md:flex-row md:items-center justify-between p-3.5 sm:px-4 sm:py-3 transition-colors cursor-pointer group hover:bg-white/[0.04] ${
+                    isSelected ? "bg-[rgba(216,26,69,0.06)]" : ""
+                  }`}
+                >
+                  {/* Left Identity: Checkbox, Avatar, Name, Job, Company */}
+                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                    {/* Checkbox */}
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleSelect(contact.id);
+                      }}
+                      className="shrink-0 p-0.5 text-[#9AA0B2] hover:text-[#F5F6FA] cursor-pointer"
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-4 h-4 text-[#FF6685]" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </div>
+
+                    {/* Avatar with Initials */}
+                    <div className={`w-9 h-9 rounded-xl bg-gradient-to-br ${avatarStyle} border flex items-center justify-center font-bold text-xs shrink-0 select-none shadow-sm`}>
+                      {initials}
+                    </div>
+
+                    {/* Text Hierarchy: Name / Role · Company */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-[#F5F6FA] group-hover:text-white transition-colors truncate">
+                          {contact.fullName}
+                        </span>
+                        {contact.opportunityTitle && (
+                          <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-[#FF6685] bg-[rgba(216,26,69,0.1)] px-1.5 py-0.2 rounded border border-[rgba(216,26,69,0.2)]">
+                            <LinkIcon className="w-2.5 h-2.5" />
+                            <span className="truncate max-w-[100px]">Offre liée</span>
                           </span>
                         )}
-                      </>
-                    ) : (
-                      handleCategoryBadge(contact.category)
+                      </div>
+
+                      {/* Clean unboxed subtitle with · separator */}
+                      <div className="flex items-center gap-1.5 text-xs text-[#9AA0B2] mt-0.5 truncate">
+                        <span className="truncate">{contact.jobTitle}</span>
+                        {contact.function && contact.function !== "Inconnue" && (
+                          <>
+                            <span aria-hidden="true" className="text-white/20">·</span>
+                            <span className="px-1.5 py-0.2 rounded bg-[rgba(192,132,252,0.12)] border border-[rgba(192,132,252,0.25)] text-[#C084FC] text-[10px] font-semibold uppercase tracking-wider">
+                              {contact.function}
+                            </span>
+                          </>
+                        )}
+                        <span aria-hidden="true" className="text-white/20">·</span>
+                        <span className="text-[#FF6685] font-medium truncate flex items-center gap-1">
+                          <Building2 className="w-3 h-3 shrink-0 inline" />
+                          {contact.companyName}
+                        </span>
+                        {contact.sector && (
+                          <>
+                            <span aria-hidden="true" className="text-white/20 hidden lg:inline">·</span>
+                            <span className="text-[#9AA0B2] hidden lg:inline truncate">{contact.sector}</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Middle / Right Meta Details */}
+                  <div className="flex items-center justify-between md:justify-end gap-3 sm:gap-6 mt-3 md:mt-0 pt-2 md:pt-0 border-t md:border-t-0 border-white/5 text-xs shrink-0">
+                    
+                    {/* Coordonnées / Channels */}
+                    <div className="w-auto md:w-36 flex items-center gap-2 text-[#9AA0B2]">
+                      {contact.email ? (
+                        <a
+                          href={`mailto:${contact.email}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1 rounded-lg hover:bg-white/10 text-[#9AA0B2] hover:text-[#F5F6FA] transition-colors"
+                          title={`Email : ${contact.email}`}
+                        >
+                          <Mail className="w-3.5 h-3.5" />
+                        </a>
+                      ) : null}
+
+                      {contact.phone ? (
+                        <a
+                          href={`tel:${contact.phone}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1 rounded-lg hover:bg-white/10 text-[#9AA0B2] hover:text-[#F5F6FA] transition-colors"
+                          title={`Téléphone : ${contact.phone}`}
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </a>
+                      ) : null}
+
+                      {contact.linkedInUrl ? (
+                        <a
+                          href={contact.linkedInUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1 rounded-lg hover:bg-[#0A66C2]/20 text-[#38BDF8] transition-colors"
+                          title="Profil LinkedIn"
+                        >
+                          <Linkedin className="w-3.5 h-3.5" />
+                        </a>
+                      ) : null}
+
+                      {contact.contactUrl ? (
+                        <a
+                          href={contact.contactUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1 rounded-lg hover:bg-white/10 text-[#9AA0B2] hover:text-[#F5F6FA] transition-colors"
+                          title={`Lien portail : ${contact.contactUrl}`}
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      ) : null}
+
+                      {!contact.email && !contact.phone && !contact.linkedInUrl && !contact.contactUrl && (
+                        <span className="text-[11px] text-[#9AA0B2]/50 italic">Aucun canal</span>
+                      )}
+                    </div>
+
+                    {/* Score IA & Primary Category */}
+                    <div className="w-auto md:w-28 flex flex-col items-center justify-center">
+                      <span className="font-mono font-bold text-xs text-[#F5F6FA] tabular-nums">
+                        {contact.relevanceScore || 50}%
+                      </span>
+                      <span className="text-[10px] text-[#9AA0B2] truncate max-w-[90px]">
+                        {contact.category === "recruiter" ? "Recruteur" : 
+                         contact.category === "alumni" ? "Alumni" : 
+                         contact.category === "sector_pro" ? "Pro Secteur" : 
+                         contact.category === "student" ? "Étudiant" : "Autre"}
+                      </span>
+                    </div>
+
+                    {/* Networking Status */}
+                    <div className="w-auto md:w-28 text-right">
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-semibold ${statusCfg.bg} ${statusCfg.textColor}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotColor}`} />
+                        <span className="truncate">{statusCfg.label}</span>
+                      </span>
+                    </div>
+
+                    {/* Row Context Menu / Actions */}
+                    <div className="w-auto md:w-16 flex items-center justify-end gap-1 relative" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setContactToEdit(contact);
+                        }}
+                        className="p-1.5 rounded-lg text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/10 transition-colors"
+                        title="Modifier"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setContactToDelete(contact);
+                        }}
+                        className="p-1.5 rounded-lg text-[#9AA0B2] hover:text-[#F04438] hover:bg-white/10 transition-colors"
+                        title="Supprimer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* ========================================================================= */
+        /* 4B. REFINED CARDS / GRID VIEW                                             */
+        /* ========================================================================= */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredContacts.map(contact => {
+            const isSelected = selectedIds.includes(contact.id);
+            const statusCfg = getStatusBadge(contact.networkingStatus);
+            const initials = getInitials(contact.fullName);
+            const avatarStyle = getAvatarGradient(contact.fullName);
+
+            return (
+              <GlassCard
+                key={contact.id}
+                onClick={() => setSelectedContact(contact)}
+                className={`relative overflow-hidden p-5 flex flex-col justify-between group transition-all duration-200 hover:-translate-y-0.5 ${
+                  isSelected ? "border-[rgba(216,26,69,0.4)] bg-[rgba(216,26,69,0.06)]" : ""
+                }`}
+                hoverable
+              >
+                {/* Specular highlight rim */}
+                <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent pointer-events-none" />
+
+                <div className="space-y-3.5 relative z-10">
+                  {/* Top Bar: Checkbox + Avatar + Score */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleSelect(contact.id);
+                        }}
+                        className="shrink-0 text-[#9AA0B2] hover:text-[#F5F6FA] cursor-pointer"
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="w-4 h-4 text-[#FF6685]" />
+                        ) : (
+                          <Square className="w-4 h-4" />
+                        )}
+                      </div>
+
+                      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${avatarStyle} border flex items-center justify-center font-bold text-xs shrink-0 select-none shadow-sm`}>
+                        {initials}
+                      </div>
+
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-bold text-[#F5F6FA] group-hover:text-white transition-colors truncate">
+                          {contact.fullName}
+                        </h3>
+                        <p className="text-xs text-[#FF6685] font-semibold truncate flex items-center gap-1 mt-0.5">
+                          <Building2 className="w-3 h-3 shrink-0" />
+                          <span className="truncate">{contact.companyName}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-white/[0.04] text-[#F5F6FA] border border-white/10 font-mono tabular-nums shrink-0">
+                      {contact.relevanceScore}%
+                    </span>
+                  </div>
+
+                  {/* Role & Normalized Function */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-xs text-[#9AA0B2] truncate">{contact.jobTitle}</span>
+                    {contact.function && contact.function !== "Inconnue" && (
+                      <span className="px-1.5 py-0.2 rounded bg-[rgba(192,132,252,0.12)] border border-[rgba(192,132,252,0.25)] text-[#C084FC] text-[9px] font-semibold uppercase tracking-wider">
+                        {contact.function}
+                      </span>
                     )}
                   </div>
-                  <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border backdrop-blur-md shrink-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.18)] ${
-                    (contact.relevanceScore || 0) >= 80 
-                      ? "bg-[rgba(216,26,69,0.14)] text-[#FF6685] border-[rgba(216,26,69,0.28)]" 
-                      : (contact.relevanceScore || 0) >= 60 
-                        ? "bg-[rgba(247,144,9,0.12)] text-[#FBBF24] border-[rgba(247,144,9,0.25)]" 
-                        : "bg-white/[0.05] text-[#F5F6FA] border-white/12"
-                  }`}>
-                    {contact.relevanceScore}%
-                  </span>
-                </div>
-                
-                {/* Contact Identity: Exact requested hierarchy */}
-                <div className="space-y-0.5">
-                  <h3 className="text-sm font-bold text-[#F5F6FA] leading-snug font-display truncate group-hover:text-white transition-colors">
-                    {contact.fullName}
-                  </h3>
-                  <p className="text-xs text-[#9AA0B2] line-clamp-1 mt-0.5">{contact.jobTitle}</p>
-                  <p className="text-xs text-[#FF6685] font-semibold flex items-center gap-1.5 mt-0.5">
-                    <Building2 className="w-3 h-3 text-[#FF6685] shrink-0" />
-                    <span className="truncate">{contact.companyName}</span>
-                  </p>
+
+                  {/* Connection Points or Academic */}
+                  {contact.connectionPoints && contact.connectionPoints.length > 0 ? (
+                    <div className="pt-2 border-t border-white/5 space-y-1">
+                      {contact.connectionPoints.slice(0, 1).map((pt, i) => (
+                        <div key={i} className="text-[11px] text-[#9AA0B2] flex items-center gap-1.5">
+                          <Sparkles className="w-3 h-3 text-[#FF6685] shrink-0" />
+                          <span className="truncate">{pt}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : contact.academicPath ? (
+                    <div className="pt-2 border-t border-white/5 text-[11px] text-[#9AA0B2] flex items-center gap-1.5 truncate">
+                      <GraduationCap className="w-3 h-3 text-[#38BDF8] shrink-0" />
+                      <span className="truncate">{contact.academicPath}</span>
+                    </div>
+                  ) : null}
                 </div>
 
-                {/* Connection Points Highlights */}
-                {contact.connectionPoints && contact.connectionPoints.length > 0 && (
-                  <div className="pt-2.5 border-t border-white/5 space-y-1">
-                    <span className="text-[10px] text-[#9AA0B2] uppercase font-semibold block">Points de connexion</span>
-                    {contact.connectionPoints.slice(0, 2).map((pt, i) => (
-                      <div key={i} className="text-[11px] text-[#9AA0B2] flex items-center gap-1.5">
-                        <Sparkles className="w-3 h-3 text-[#9AA0B2]/80 group-hover:text-[#FF6685] transition-colors shrink-0" />
-                        <span className="truncate">{pt}</span>
-                      </div>
-                    ))}
+                {/* Footer: Channels + Status + View */}
+                <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs relative z-10">
+                  {/* Channels */}
+                  <div className="flex items-center gap-1.5">
+                    {contact.linkedInUrl && (
+                      <span className="p-1 rounded-lg bg-white/[0.04] text-[#38BDF8] border border-white/10" title="LinkedIn disponible">
+                        <Linkedin className="w-3 h-3" />
+                      </span>
+                    )}
+                    {contact.email && (
+                      <span className="p-1 rounded-lg bg-white/[0.04] text-[#9AA0B2] border border-white/10" title="Email disponible">
+                        <Mail className="w-3 h-3" />
+                      </span>
+                    )}
+                    {contact.phone && (
+                      <span className="p-1 rounded-lg bg-white/[0.04] text-[#9AA0B2] border border-white/10" title="Téléphone disponible">
+                        <Phone className="w-3 h-3" />
+                      </span>
+                    )}
                   </div>
-                )}
-              </div>
 
-              {/* Card Footer: Status or LinkedIn + View Action */}
-              <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between text-xs relative z-10">
-                <div className="flex items-center gap-1.5">
-                  {contact.linkedInUrl && (
-                    <span className="p-1 rounded-lg bg-white/[0.04] text-[#9AA0B2] group-hover:text-[#F5F6FA] border border-white/10 transition-colors" title="Profil LinkedIn disponible">
-                      <Linkedin className="w-3.5 h-3.5" />
+                  {/* Status & View */}
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-lg border text-[10px] font-semibold ${statusCfg.bg} ${statusCfg.textColor}`}>
+                      {statusCfg.label}
                     </span>
-                  )}
-                  {contact.contactUrl && (
-                    <a
-                      href={contact.contactUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="px-2 py-0.5 rounded-lg bg-white/[0.04] text-[#9AA0B2] group-hover:text-[#F5F6FA] border border-white/10 transition-colors flex items-center gap-1"
-                      title={`Lien web de contact : ${contact.contactUrl}`}
-                    >
-                      <LinkIcon className="w-3 h-3" />
-                      <span className="truncate max-w-[85px] text-[11px]">Lien web</span>
-                    </a>
-                  )}
-                  {contact.opportunityTitle && (
-                    <span className="px-2 py-0.5 rounded-lg bg-[rgba(216,26,69,0.12)] border border-[rgba(216,26,69,0.25)] text-[#FF6685] flex items-center gap-1 text-[11px] backdrop-blur-sm" title={`Lié à : ${contact.opportunityTitle}`}>
-                      <LinkIcon className="w-3 h-3" />
-                      <span className="truncate max-w-[95px]">{language === "en" ? "Linked job" : "Offre liée"}</span>
+                    
+                    <span className="p-1 rounded-lg text-[#9AA0B2] group-hover:text-[#F5F6FA] transition-colors">
+                      <ChevronRight className="w-4 h-4" />
                     </span>
-                  )}
+                  </div>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setContactToDelete(contact);
-                    }}
-                    className="p-1.5 rounded-xl text-[#9AA0B2] hover:text-[#F04438] hover:bg-white/[0.05] border border-transparent hover:border-white/10 transition-all cursor-pointer"
-                    title={language === "en" ? "Delete this contact" : "Supprimer ce contact"}
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-
-                  <span className="px-3 py-1.5 rounded-xl bg-white/[0.05] group-hover:bg-white/[0.10] text-xs font-semibold text-[#F5F6FA] border border-white/10 group-hover:border-white/20 backdrop-blur-xl shadow-[inset_0_1px_1px_rgba(255,255,255,0.18)] flex items-center gap-1 transition-all cursor-pointer">
-                    <span>{language === "en" ? "View" : "Consulter"}</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-[#FF6685] group-hover:translate-x-0.5 transition-transform" />
-                  </span>
-                </div>
-              </div>
-            </GlassCard>
-          ))}
+              </GlassCard>
+            );
+          })}
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* 5. ADD CONTACT MODAL                                                      */}
+      {/* 5. FLOATING BATCH ACTION BAR (When contacts are selected)                 */}
+      {/* ========================================================================= */}
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-6 inset-x-0 z-40 flex justify-center px-4 pointer-events-none animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="pointer-events-auto flex items-center gap-3 p-2.5 px-4 rounded-2xl bg-[#0B0F19]/95 backdrop-blur-2xl border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.8)] text-xs text-[#F5F6FA] max-w-2xl w-full justify-between flex-wrap">
+            
+            <div className="flex items-center gap-2.5">
+              <span className="w-2 h-2 rounded-full bg-[#FF6685] animate-pulse" />
+              <span className="font-bold font-display">
+                {selectedIds.length} contact{selectedIds.length > 1 ? "s" : ""} sélectionné{selectedIds.length > 1 ? "s" : ""}
+              </span>
+              <button
+                type="button"
+                onClick={handleDeselectAll}
+                className="text-[11px] text-[#9AA0B2] hover:text-white underline ml-1 cursor-pointer"
+              >
+                Désélectionner
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {/* Batch status dropdown */}
+              <select
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleBatchStatusChange(e.target.value as ContactNetworkingStatus);
+                    e.target.value = "";
+                  }
+                }}
+                defaultValue=""
+                className="glass-input px-2.5 py-1.5 text-xs text-[#F5F6FA] bg-[#060812] cursor-pointer rounded-xl"
+              >
+                <option value="" disabled>Changer statut...</option>
+                <option value="to_contact" className="bg-[#0B0F19]">À contacter</option>
+                <option value="contacted" className="bg-[#0B0F19]">Message envoyé</option>
+                <option value="exchanging" className="bg-[#0B0F19]">Échange en cours</option>
+                <option value="interview_done" className="bg-[#0B0F19]">Entretien réalisé</option>
+                <option value="not_interested" className="bg-[#0B0F19]">Sans suite</option>
+              </select>
+
+              {/* Copy emails */}
+              <button
+                type="button"
+                onClick={handleBatchCopyEmails}
+                className="p-1.5 px-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-[#F5F6FA] border border-white/10 flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                title="Copier les emails disponibles"
+              >
+                <Copy className="w-3.5 h-3.5 text-[#9AA0B2]" />
+                <span className="hidden sm:inline">Emails</span>
+              </button>
+
+              {/* Export CSV */}
+              <button
+                type="button"
+                onClick={handleBatchExportCsv}
+                className="p-1.5 px-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-[#F5F6FA] border border-white/10 flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                title="Exporter au format CSV"
+              >
+                <Download className="w-3.5 h-3.5 text-[#9AA0B2]" />
+                <span className="hidden sm:inline">Export</span>
+              </button>
+
+              {/* Batch Delete */}
+              <button
+                type="button"
+                onClick={() => setIsBatchDeleteModalOpen(true)}
+                className="p-1.5 px-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 text-[#F04438] border border-red-500/20 flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                title="Supprimer les contacts sélectionnés"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Supprimer</span>
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 6. ADD CONTACT MODAL                                                      */}
       {/* ========================================================================= */}
       <Modal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        title={language === "en" ? "Add contact to network" : "Ajouter un contact au réseau"}
+        title="Ajouter un contact"
         size="md"
       >
         <form onSubmit={handleAddContact} className="space-y-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Full name *" : "Nom complet *"}</label>
+            <label className="text-xs text-[#9AA0B2] font-semibold">Nom et prénom *</label>
             <input
               type="text"
               required
-              placeholder={language === "en" ? "e.g. Sarah Connor" : "ex: Sophie Martin"}
+              placeholder="ex: Sophie Martin"
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Company *" : "Entreprise *"}</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">Entreprise *</label>
               <input
                 type="text"
                 required
-                placeholder={language === "en" ? "e.g. BNP Paribas, Google..." : "ex: LCL, Crédit Agricole..."}
+                placeholder="ex: Crédit Agricole, BNP Paribas..."
                 value={formCompany}
                 onChange={(e) => setFormCompany(e.target.value)}
                 className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Job title *" : "Poste *"}</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">Poste / Intitulé exact *</label>
               <input
                 type="text"
                 required
-                placeholder={language === "en" ? "e.g. Senior Wealth Advisor" : "ex: Conseillère Patrimoniale"}
+                placeholder="ex: Directeur de région, DRH..."
                 value={formJob}
                 onChange={(e) => setFormJob(e.target.value)}
                 className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
@@ -1366,38 +1884,76 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Category" : "Catégorie"}</label>
-            <select
-              value={formCategory}
-              onChange={(e) => setFormCategory(e.target.value as any)}
-              className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] bg-[#060812]"
-            >
-              <option value="alumni" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Alumni (Same school / university)" : "Alumni (Même formation / école)"}</option>
-              <option value="recruiter" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Recruiter / HR" : "Recruteur / RH"}</option>
-              <option value="sector_pro" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Target Sector Professional" : "Professionnel Secteur Cible"}</option>
-              <option value="student" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Student" : "Étudiant"}</option>
-              <option value="other_pro" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Other Sector Professional" : "Professionnel Autre Secteur"}</option>
-              <option value="other" className="bg-[#060812] text-[#F5F6FA]">{language === "en" ? "Other" : "Autre"}</option>
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[#9AA0B2] font-semibold flex items-center justify-between">
+                <span>Fonction normalisée (taxonomie)</span>
+                {formJob.trim() && formFunction === "auto" && (
+                  <span className="text-[10px] text-[#C084FC] font-normal truncate max-w-[140px]">
+                    Auto: {classifyContactFunction(formJob.trim(), formCompany.trim()).function}
+                  </span>
+                )}
+              </label>
+              <select
+                value={formFunction}
+                onChange={(e) => setFormFunction(e.target.value)}
+                className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19]"
+              >
+                <option value="auto" className="bg-[#0B0F19] text-[#F5F6FA]">
+                  ✨ Déduction automatique (selon le poste)
+                </option>
+                {STANDARD_CONTACT_FUNCTIONS.map((fn) => (
+                  <option key={fn} value={fn} className="bg-[#0B0F19] text-[#F5F6FA]">
+                    {fn}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[#9AA0B2] font-semibold">Catégorie relationnelle</label>
+              <select
+                value={formCategory}
+                onChange={(e) => setFormCategory(e.target.value as ContactCategory)}
+                className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19]"
+              >
+                <option value="recruiter" className="bg-[#0B0F19] text-[#F5F6FA]">Recruteur / RH</option>
+                <option value="alumni" className="bg-[#0B0F19] text-[#F5F6FA]">Alumni (Même formation / école)</option>
+                <option value="sector_pro" className="bg-[#0B0F19] text-[#F5F6FA]">Professionnel Secteur Cible</option>
+                <option value="student" className="bg-[#0B0F19] text-[#F5F6FA]">Étudiant</option>
+                <option value="other_pro" className="bg-[#0B0F19] text-[#F5F6FA]">Professionnel Autre Secteur</option>
+                <option value="other" className="bg-[#0B0F19] text-[#F5F6FA]">Autre</option>
+              </select>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-[#9AA0B2] font-semibold">Localisation / Secteur géographique</label>
+            <input
+              type="text"
+              placeholder="ex: Clermont-Ferrand, Auvergne-Rhône-Alpes, Paris..."
+              value={formLocation}
+              onChange={(e) => setFormLocation(e.target.value)}
+              className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Email (optional)" : "Email (optionnel)"}</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">Email professionnel</label>
               <input
                 type="email"
-                placeholder={language === "en" ? "e.g. contact@company.com" : "ex: contact@entreprise.fr"}
+                placeholder="contact@entreprise.fr"
                 value={formEmail}
                 onChange={(e) => setFormEmail(e.target.value)}
                 className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Phone (optional)" : "Téléphone (optionnel)"}</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">Téléphone</label>
               <input
                 type="tel"
-                placeholder="ex: 06 12 34 56 78"
+                placeholder="06 12 34 56 78"
                 value={formPhone}
                 onChange={(e) => setFormPhone(e.target.value)}
                 className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
@@ -1405,9 +1961,9 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "LinkedIn profile URL (optional)" : "URL LinkedIn (optionnel)"}</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">URL Profil LinkedIn</label>
               <input
                 type="url"
                 placeholder="https://www.linkedin.com/in/..."
@@ -1417,10 +1973,10 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Website / Portal link (optional)" : "Lien internet / Site web / Portail (optionnel)"}</label>
+              <label className="text-xs text-[#9AA0B2] font-semibold">Lien web / Portail</label>
               <input
                 type="url"
-                placeholder="ex: https://entreprise.fr/candidature"
+                placeholder="https://entreprise.fr/carrieres"
                 value={formContactUrl}
                 onChange={(e) => setFormContactUrl(e.target.value)}
                 className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
@@ -1429,28 +1985,215 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-[#9AA0B2] font-semibold">{language === "en" ? "Notes / Context notes" : "Notes / Informations de contexte"}</label>
+            <label className="text-xs text-[#9AA0B2] font-semibold">Notes de contexte</label>
             <textarea
-              placeholder={language === "en" ? "e.g. Met at careers fair, great contact for industry insights..." : "ex: Rencontrée lors d'un forum carrières, très bon contact pour échange sur le secteur..."}
+              placeholder="ex: Rencontrée lors du forum entreprises, contact très positif..."
               value={formNotes}
               onChange={(e) => setFormNotes(e.target.value)}
-              className="w-full min-h-[75px] glass-input p-3 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
+              className="w-full min-h-[70px] glass-input p-3 text-xs text-[#F5F6FA] placeholder-[#9AA0B2]/60"
             />
           </div>
 
-          <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
-            <GlassButton type="button" variant="ghost" onClick={() => setIsAddModalOpen(false)}>
-              {language === "en" ? "Cancel" : "Annuler"}
+          <div className="flex justify-end gap-2.5 pt-3 border-t border-white/10">
+            <GlassButton type="button" variant="ghost" size="sm" onClick={() => setIsAddModalOpen(false)}>
+              Annuler
             </GlassButton>
-            <GlassButton type="submit" variant="primary">
-              {t.contacts.addContact}
+            <GlassButton type="submit" variant="primary" size="sm">
+              Ajouter au carnet
             </GlassButton>
           </div>
         </form>
       </Modal>
 
       {/* ========================================================================= */}
-      {/* 6. IMPORT LINKEDIN MODAL (Preserved completely)                           */}
+      {/* 7. QUICK EDIT MODAL                                                       */}
+      {/* ========================================================================= */}
+      {contactToEdit && (
+        <Modal
+          isOpen={Boolean(contactToEdit)}
+          onClose={() => setContactToEdit(null)}
+          title={`Modifier ${contactToEdit.fullName}`}
+          size="md"
+        >
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleUpdateContact(contactToEdit);
+            }} 
+            className="space-y-4"
+          >
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[#9AA0B2] font-semibold">Nom complet *</label>
+              <input
+                type="text"
+                required
+                value={contactToEdit.fullName}
+                onChange={(e) => setContactToEdit({ ...contactToEdit, fullName: e.target.value })}
+                className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-[#9AA0B2] font-semibold">Entreprise *</label>
+                <input
+                  type="text"
+                  required
+                  value={contactToEdit.companyName}
+                  onChange={(e) => setContactToEdit({ ...contactToEdit, companyName: e.target.value })}
+                  className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-[#9AA0B2] font-semibold">Poste *</label>
+                <input
+                  type="text"
+                  required
+                  value={contactToEdit.jobTitle}
+                  onChange={(e) => setContactToEdit({ ...contactToEdit, jobTitle: e.target.value })}
+                  className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-[#9AA0B2] font-semibold">Statut Relationnel</label>
+                <select
+                  value={contactToEdit.networkingStatus || "to_contact"}
+                  onChange={(e) => setContactToEdit({ ...contactToEdit, networkingStatus: e.target.value as ContactNetworkingStatus })}
+                  className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19]"
+                >
+                  <option value="to_contact">À contacter</option>
+                  <option value="contacted">Message envoyé</option>
+                  <option value="exchanging">Échange en cours</option>
+                  <option value="interview_done">Entretien réalisé</option>
+                  <option value="not_interested">Sans suite</option>
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-[#9AA0B2] font-semibold">Catégorie</label>
+                <select
+                  value={contactToEdit.category}
+                  onChange={(e) => setContactToEdit({ ...contactToEdit, category: e.target.value as ContactCategory })}
+                  className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA] bg-[#0B0F19]"
+                >
+                  <option value="recruiter">Recruteur / RH</option>
+                  <option value="alumni">Alumni</option>
+                  <option value="sector_pro">Pro Secteur Cible</option>
+                  <option value="student">Étudiant</option>
+                  <option value="other_pro">Pro Autre Secteur</option>
+                  <option value="other">Autre</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-[#9AA0B2] font-semibold">Email professionnel</label>
+                <input
+                  type="email"
+                  value={contactToEdit.email || ""}
+                  onChange={(e) => setContactToEdit({ ...contactToEdit, email: e.target.value })}
+                  className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs text-[#9AA0B2] font-semibold">Téléphone</label>
+                <input
+                  type="tel"
+                  value={contactToEdit.phone || ""}
+                  onChange={(e) => setContactToEdit({ ...contactToEdit, phone: e.target.value })}
+                  className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-[#9AA0B2] font-semibold">URL Profil LinkedIn</label>
+              <input
+                type="url"
+                value={contactToEdit.linkedInUrl || ""}
+                onChange={(e) => setContactToEdit({ ...contactToEdit, linkedInUrl: e.target.value })}
+                className="glass-input px-3.5 py-2 text-xs text-[#F5F6FA]"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-white/10">
+              <GlassButton type="button" variant="ghost" size="sm" onClick={() => setContactToEdit(null)}>
+                Annuler
+              </GlassButton>
+              <GlassButton type="submit" variant="primary" size="sm">
+                Enregistrer
+              </GlassButton>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 8. SINGLE DELETE MODAL                                                    */}
+      {/* ========================================================================= */}
+      {contactToDelete && (
+        <Modal
+          isOpen={Boolean(contactToDelete)}
+          onClose={() => setContactToDelete(null)}
+          title="Supprimer le contact"
+          size="sm"
+        >
+          <div className="space-y-4">
+            <p className="text-xs text-[#9AA0B2] leading-relaxed">
+              Êtes-vous sûr de vouloir supprimer définitivement <strong className="text-[#F5F6FA]">{contactToDelete.fullName}</strong> ({contactToDelete.companyName}) ? Cette action est irréversible.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <GlassButton variant="ghost" size="sm" onClick={() => setContactToDelete(null)}>
+                Annuler
+              </GlassButton>
+              <GlassButton
+                variant="danger"
+                size="sm"
+                onClick={() => handleDeleteContact(contactToDelete.id)}
+              >
+                Supprimer
+              </GlassButton>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 9. BATCH DELETE MODAL                                                     */}
+      {/* ========================================================================= */}
+      {isBatchDeleteModalOpen && (
+        <Modal
+          isOpen={isBatchDeleteModalOpen}
+          onClose={() => setIsBatchDeleteModalOpen(false)}
+          title={`Supprimer ${selectedIds.length} contact(s)`}
+          size="sm"
+        >
+          <div className="space-y-4">
+            <p className="text-xs text-[#9AA0B2] leading-relaxed">
+              Êtes-vous sûr de vouloir supprimer définitivement ces <strong className="text-[#F5F6FA]">{selectedIds.length} contacts</strong> ? Cette action est irréversible.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <GlassButton variant="ghost" size="sm" onClick={() => setIsBatchDeleteModalOpen(false)}>
+                Annuler
+              </GlassButton>
+              <GlassButton
+                variant="danger"
+                size="sm"
+                onClick={handleConfirmBatchDelete}
+              >
+                Confirmer la suppression
+              </GlassButton>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 10. PRESERVED LINKEDIN & TEXT IMPORT MODALS                               */}
       {/* ========================================================================= */}
       <LinkedInImportModal
         isOpen={isImportModalOpen}
@@ -1459,9 +2202,6 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
         showToast={showToast}
       />
 
-      {/* ========================================================================= */}
-      {/* 6B. IMPORT TEXT MODAL                                                     */}
-      {/* ========================================================================= */}
       <ImportContactsTextModal
         isOpen={isTextImportModalOpen}
         onClose={() => setIsTextImportModalOpen(false)}
@@ -1469,46 +2209,16 @@ export const Contacts: React.FC<ContactsProps> = ({ showToast, searchTerm, initi
         showToast={showToast}
       />
 
-      {/* ========================================================================= */}
-      {/* 7. DELETE CONFIRMATION MODAL                                              */}
-      {/* ========================================================================= */}
-      <Modal
-        isOpen={Boolean(contactToDelete)}
-        onClose={() => setContactToDelete(null)}
-        title={language === "en" ? "Delete contact" : "Supprimer le contact"}
-        size="sm"
-      >
-        <div className="space-y-4">
-          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-200 leading-relaxed">
-            {language === "en" ? (
-              <>Are you sure you want to permanently delete the contact <strong className="text-white font-bold">{contactToDelete?.fullName}</strong> ({contactToDelete?.companyName})? This action is irreversible.</>
-            ) : (
-              <>Êtes-vous sûr de vouloir supprimer définitivement le contact <strong className="text-white font-bold">{contactToDelete?.fullName}</strong> ({contactToDelete?.companyName}) ? Cette action est irréversible.</>
-            )}
-          </div>
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <GlassButton
-              variant="ghost"
-              size="sm"
-              onClick={() => setContactToDelete(null)}
-            >
-              {language === "en" ? "Cancel" : "Annuler"}
-            </GlassButton>
-            <GlassButton
-              variant="danger"
-              size="sm"
-              onClick={() => {
-                if (contactToDelete) {
-                  handleDeleteContact(contactToDelete.id);
-                  setContactToDelete(null);
-                }
-              }}
-            >
-              {language === "en" ? "Confirm deletion" : "Confirmer la suppression"}
-            </GlassButton>
-          </div>
-        </div>
-      </Modal>
+      <ConversationImportModal
+        isOpen={isConversationImportModalOpen}
+        onClose={() => setIsConversationImportModalOpen(false)}
+        candidateProfile={profile}
+        showToast={showToast}
+        onConversationImported={() => {
+          setContacts(dbStore.getContacts());
+        }}
+      />
+
     </div>
   );
 };

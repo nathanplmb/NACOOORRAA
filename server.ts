@@ -12,8 +12,11 @@ import {
   generateDailyBrief,
   parseContactsFromText,
   enrichCompanyWithWebSearch,
-  evaluateContactStrategicInterests
+  evaluateContactStrategicInterests,
+  parseProspectingQuery,
+  generateConversationReply
 } from "./src/api/gemini.ts";
+import { executeWebProspectingSearch } from "./src/api/webProspectingEngine.ts";
 import { 
   optimizeExperienceWithFramework, 
   auditProfileAgainstFramework, 
@@ -25,6 +28,9 @@ import {
   generateFollowUpMessageWithFramework 
 } from "./src/api/networkingFramework.ts";
 import { extractJobOfferWithCascade } from "./src/api/jobExtractor.ts";
+import { adminRouter } from "./src/server/adminRoutes.ts";
+import { checkCredits, consumeCredits } from "./src/server/creditsEngine.ts";
+import { recordUserSession } from "./src/server/sessionEngine.ts";
 
 dotenv.config();
 
@@ -45,6 +51,42 @@ async function startServer() {
   // API routes go here FIRST
   app.get("/api/health", (req, res) => {
     res.json({ status: "healthy", timestamp: new Date().toISOString() });
+  });
+
+  // Dedicated Administrative API (Guarded by requireAdmin token verification)
+  app.use("/api/admin", adminRouter);
+
+  // User session activity tracking endpoint
+  app.post("/api/sessions/record", async (req, res) => {
+    const { userId, userEmail, userName, sessionId } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId requis" });
+    const userAgent = (req.headers["user-agent"] as string) || "";
+    const rawIp = (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "").split(",")[0].trim();
+    const session = await recordUserSession({ userId, userEmail, userName, userAgent, ip: rawIp, sessionId });
+    return res.json({ success: true, session });
+  });
+
+  // Autonomous NACORA B2B Web Prospecting Engine (Search real public web and enterprise registries)
+  app.post("/api/prospecting/search-web", async (req, res) => {
+    const { query, target, filters } = req.body;
+    if (!query || typeof query !== "string") {
+      return res.status(400).json({ error: "Requête de recherche requise" });
+    }
+
+    try {
+      console.log(`[NACORA Web Prospecting] Searching for: "${query}" (target: ${target || 'auto'})`);
+      const results = await executeWebProspectingSearch({ query, target, filters });
+      return res.json({
+        success: true,
+        ...results
+      });
+    } catch (err: any) {
+      console.error("[NACORA Web Prospecting Error]", err);
+      return res.status(500).json({
+        success: false,
+        error: "Recherche indisponible : " + (err.message || "Erreur de communication avec le moteur de prospection Web")
+      });
+    }
   });
 
   // URL Scraping route with bot-detection handling
@@ -195,52 +237,90 @@ async function startServer() {
   });
 
   app.post("/api/gemini", async (req, res) => {
-    const { action, payload } = req.body;
+    const { action, payload, userId, idempotencyKey } = req.body;
     console.log(`[Server] Incoming action: ${action}`);
     if (!process.env.GEMINI_API_KEY) {
       console.warn("[Server] GEMINI_API_KEY is not defined");
     }
+
+    // 1. Centralized credit check before calling Gemini AI
+    if (userId) {
+      const creditCheck = await checkCredits(userId, 1);
+      if (!creditCheck.allowed) {
+        return res.status(402).json({
+          success: false,
+          error: creditCheck.reason || "Crédits insuffisants pour effectuer cette opération IA.",
+          code: "CREDITS_INSUFFICIENT",
+          balanceRemaining: creditCheck.currentBalance
+        });
+      }
+    }
+
     try {
       if (!action) return res.status(400).json({ error: "Missing action" });
       
+      let resultData: any;
       switch (action) {
         case "extractJobOffer":
-          // Nouvelle extraction haute précision avec cascade de modèles et fallback
-          return res.json(await extractJobOfferWithCascade(payload.jobDescription, payload.sourceUrl));
+          resultData = await extractJobOfferWithCascade(payload.jobDescription, payload.sourceUrl);
+          break;
         case "parseCV":
-          return res.json(await parseCV(payload.cvText, payload.linkedinText));
+          resultData = await parseCV(payload.cvText, payload.linkedinText);
+          break;
         case "generateDailyBrief":
-          return res.json(await generateDailyBrief(payload));
+          resultData = await generateDailyBrief(payload);
+          break;
         case "extractJobDetails":
-          return res.json(await extractJobDetails(payload.jobDescription));
+          resultData = await extractJobDetails(payload.jobDescription);
+          break;
         case "analyzeLinkedIn":
-          return res.json(await analyzeLinkedInContacts(payload.rawContacts, payload.profile));
+          resultData = await analyzeLinkedInContacts(payload.rawContacts, payload.profile);
+          break;
         case "parseContactsFromText":
-          return res.json(await parseContactsFromText(payload.text, payload.profile));
+          resultData = await parseContactsFromText(payload.text, payload.profile);
+          break;
         case "outreachMessage":
-          return res.json({ message: await generateOutreachMessage(
+          resultData = { message: await generateOutreachMessage(
             payload.contactName, payload.contactJob, payload.contactCompany, 
             payload.connectionPoints || [], payload.profile, payload.opportunityTitle,
             payload.format
-          )});
+          )};
+          break;
         case "enrichCompany":
-          return res.json(await enrichCompanyWithWebSearch(payload.companyName));
+          resultData = await enrichCompanyWithWebSearch(payload.companyName);
+          break;
         case "evaluateContactStrategicInterests":
-          return res.json(await evaluateContactStrategicInterests(payload.contact, payload.profile));
+          resultData = await evaluateContactStrategicInterests(payload.contact, payload.profile);
+          break;
         case "optimizeCVExperience":
-          return res.json(await optimizeExperienceWithFramework(payload.experience, payload.profile, payload.targetOfferTitle));
+          resultData = await optimizeExperienceWithFramework(payload.experience, payload.profile, payload.targetOfferTitle);
+          break;
         case "auditCV":
-          return res.json(await auditProfileAgainstFramework(payload.profile));
+          resultData = await auditProfileAgainstFramework(payload.profile);
+          break;
         case "matchOpportunity":
-          return res.json(computeOpportunityMatch(payload.profile, payload.opportunity, payload.documents || []));
+          resultData = computeOpportunityMatch(payload.profile, payload.opportunity, payload.documents || []);
+          break;
         case "recommendNetworkingStrategy":
-          return res.json(recommendNetworkingStrategy(payload.contact, payload.profile, payload.goal, payload.preferredChannel));
+          resultData = recommendNetworkingStrategy(payload.contact, payload.profile, payload.goal, payload.preferredChannel);
+          break;
         case "generateNetworkingOutreach":
-          return res.json(await generateOutreachMessageWithFramework(payload.contact, payload.profile, payload.options));
+          resultData = await generateOutreachMessageWithFramework(payload.contact, payload.profile, payload.options);
+          break;
         case "generateNetworkingFollowUp":
-          return res.json(generateFollowUpMessageWithFramework(payload.contact, payload.profile, payload.followUpNumber, payload.options));
+          resultData = generateFollowUpMessageWithFramework(payload.contact, payload.profile, payload.followUpNumber, payload.options);
+          break;
+        case "generateConversationReply":
+          resultData = await generateConversationReply(payload);
+          break;
+        case "parseProspectingQuery": {
+          const parsed = await parseProspectingQuery(payload.query);
+          console.log(`[Prospecting] Query parsed: "${payload.query}"`);
+          resultData = { response: parsed, ...parsed };
+          break;
+        }
         case "chat":
-          return res.json({ 
+          resultData = { 
             response: await handlePersonaChat(
               payload.personaId, 
               payload.messages, 
@@ -248,14 +328,39 @@ async function startServer() {
               payload.activeFocus, 
               payload.contextSummary
             ) 
-          });
+          };
+          break;
         default:
           return res.status(400).json({ error: `Unknown action: ${action}` });
       }
+
+      // 2. Consume credits upon successful completion with idempotency key
+      if (userId) {
+        await consumeCredits({
+          userId,
+          creditsToDeduct: 1,
+          feature: action,
+          model: "gemini-2.5-flash",
+          tokens: { input: 350, output: 250, total: 600 },
+          costEuro: 0.0003,
+          idempotencyKey
+        }).catch(err => console.warn("[Server] Credit consume error:", err));
+      }
+
+      return res.json(resultData);
     } catch (error: any) {
       console.error(`Error in /api/gemini:`, error);
       return res.status(500).json({ error: error.message || "Internal server error" });
     }
+  });
+
+  // Explicit API 404 handler: guarantees /api/* requests ALWAYS return application/json and NEVER index.html
+  app.all("/api/*", (req, res) => {
+    return res.status(404).json({
+      success: false,
+      error: `Route API introuvable : ${req.method} ${req.path}`,
+      code: "API_ROUTE_NOT_FOUND"
+    });
   });
 
   // Vite middleware for development

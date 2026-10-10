@@ -26,8 +26,10 @@ import {
   Cloud,
   RefreshCw,
   Database,
-  CheckCircle2
+  CheckCircle2,
+  Cpu
 } from "lucide-react";
+import { AiUsageSettingsSection } from "../components/AiUsageSettingsSection";
 
 interface SettingsProps {
   showToast: (message: string, type: "success" | "error" | "info" | "ai") => void;
@@ -216,6 +218,7 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
       importBtn: "Importer une sauvegarde (JSON)",
       connections: "Connexions & Intégrations",
       connectionsSub: "Services tiers liés à votre compte NACORA",
+      aiUsage: "Utilisation IA & Tokens",
       support: "Support & Ressources",
       supportSub: "Assistance et documentation officielle",
       helpCenter: "Centre d'aide & FAQ",
@@ -288,6 +291,7 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
       importBtn: "Import backup (JSON)",
       connections: "Connections & Integrations",
       connectionsSub: "Third-party services linked to your NACORA account",
+      aiUsage: "AI & Token Usage",
       support: "Support & Resources",
       supportSub: "Assistance and official documentation",
       helpCenter: "Help Center & FAQ",
@@ -352,6 +356,7 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
               {[
                 { href: "#compte", label: t.account, icon: User },
                 { href: "#securite", label: t.security, icon: Shield },
+                { href: "#ai-tokens", label: t.aiUsage, icon: Cpu },
                 { href: "#notifications", label: t.notifications, icon: Bell },
                 { href: "#apparence", label: t.appPrefs, icon: Monitor },
                 { href: "#donnees", label: t.dataExport, icon: Download },
@@ -528,7 +533,10 @@ export const Settings: React.FC<SettingsProps> = ({ showToast, onNavigate }) => 
             </div>
           </section>
 
-          {/* 3. NOTIFICATIONS */}
+          {/* 3. UTILISATION IA & TOKENS */}
+          <AiUsageSettingsSection showToast={showToast} language={language} />
+
+          {/* 4. NOTIFICATIONS */}
           <section id="notifications" className="glass-panel rounded-3xl p-6 sm:p-8 backdrop-blur-3xl space-y-6 shadow-[0_20px_50px_rgba(0,0,0,0.7)] border border-white/12 relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#FBBF24] via-[#F59E0B] to-transparent" />
             <div className="flex items-center gap-3 pb-4 border-b border-white/10">

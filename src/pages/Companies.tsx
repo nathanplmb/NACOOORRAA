@@ -5,6 +5,7 @@ import { Company, Contact, Opportunity } from "../types";
 import { GlassCard, Badge, GlassButton, Modal } from "../components/Shared";
 import { CompanyDetailWorkspace } from "../components/CompanyDetailWorkspace";
 import { getCompanyTheme } from "../utils/companyColors";
+import { isSameCompany } from "../utils/companyResolver";
 import { 
   Building2, 
   Search, 
@@ -28,7 +29,8 @@ import {
   ExternalLink, 
   Layers, 
   Filter, 
-  Check 
+  Check,
+  X
 } from "lucide-react";
 
 interface CompaniesProps {
@@ -37,7 +39,11 @@ interface CompaniesProps {
   onSelectContact?: (contactId: string) => void;
 }
 
-export const Companies: React.FC<CompaniesProps> = ({ searchTerm, showToast, onSelectContact }) => {
+export const Companies: React.FC<CompaniesProps> = ({ 
+  searchTerm, 
+  showToast, 
+  onSelectContact
+}) => {
   const { language, t } = useLanguage();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
@@ -46,6 +52,7 @@ export const Companies: React.FC<CompaniesProps> = ({ searchTerm, showToast, onS
   
   // Filter & Search
   const [selectedSector, setSelectedSector] = useState<string>("all");
+  const [companySearch, setCompanySearch] = useState("");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   // Form State for Adding Company
@@ -67,8 +74,8 @@ export const Companies: React.FC<CompaniesProps> = ({ searchTerm, showToast, onS
     if (selectedCompany) {
       const allContacts = dbStore.getContacts();
       const allOpps = dbStore.getOpportunities();
-      setAssociatedContacts(allContacts.filter(c => c.companyId === selectedCompany.id || c.companyName?.toLowerCase() === selectedCompany.name?.toLowerCase()));
-      setAssociatedOpps(allOpps.filter(o => o.companyId === selectedCompany.id || o.companyName?.toLowerCase() === selectedCompany.name?.toLowerCase()));
+      setAssociatedContacts(allContacts.filter(c => c.companyId === selectedCompany.id || isSameCompany(c.companyName, selectedCompany.name)));
+      setAssociatedOpps(allOpps.filter(o => o.companyId === selectedCompany.id || isSameCompany(o.companyName, selectedCompany.name)));
     }
   }, [selectedCompany, companies]);
 
@@ -84,12 +91,14 @@ export const Companies: React.FC<CompaniesProps> = ({ searchTerm, showToast, onS
   }, [companies]);
 
   const filteredCompanies = useMemo(() => {
+    const q = (companySearch || searchTerm || "").trim().toLowerCase();
     return companies.filter(co => {
-      const matchesSearch = 
-        co.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (co.sector && co.sector.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (co.description && co.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (co.location && co.location.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchesSearch = !q ||
+        co.name.toLowerCase().includes(q) ||
+        (co.sector && co.sector.toLowerCase().includes(q)) ||
+        (co.description && co.description.toLowerCase().includes(q)) ||
+        (co.location && co.location.toLowerCase().includes(q)) ||
+        (co.notes && co.notes.toLowerCase().includes(q));
 
       const matchesSector = 
         selectedSector === "all" || 
@@ -97,7 +106,7 @@ export const Companies: React.FC<CompaniesProps> = ({ searchTerm, showToast, onS
 
       return matchesSearch && matchesSector;
     });
-  }, [companies, searchTerm, selectedSector]);
+  }, [companies, searchTerm, companySearch, selectedSector]);
 
   // Stats calculation
   const totalEnriched = useMemo(() => {
@@ -240,39 +249,72 @@ export const Companies: React.FC<CompaniesProps> = ({ searchTerm, showToast, onS
         </div>
       </div>
 
-      {/* 3. SECTOR FILTER CHIPS */}
-      {availableSectors.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none flex-nowrap">
-          <button
-            onClick={() => setSelectedSector("all")}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap cursor-pointer border ${
-              selectedSector === "all"
-                ? "bg-white/[0.1] text-white border-white/25 shadow-[0_0_12px_rgba(255,255,255,0.08)]"
-                : "bg-white/[0.02] hover:bg-white/[0.05] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/5"
-            }`}
-          >
-            {language === "en" ? "All Sectors" : "Tous les secteurs"} ({companies.length})
-          </button>
-          {availableSectors.map((sector) => {
-            const count = companies.filter(c => c.sector === sector).length;
-            const isSelected = selectedSector.toLowerCase() === sector.toLowerCase();
-            return (
+      {/* 3. RECHERCHE & FILTRAGE LIQUID GLASS */}
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Barre de recherche Liquid Glass */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9AA0B2]" />
+            <input
+              type="text"
+              value={companySearch}
+              onChange={(e) => setCompanySearch(e.target.value)}
+              placeholder={language === "en" ? "Search company, sector, city, keywords..." : "Rechercher une entreprise, secteur, ville, mot-clé..."}
+              className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.06] border border-white/10 text-xs sm:text-sm text-[#F5F6FA] placeholder-[#9AA0B2]/60 focus:border-[#D81A45]/50 focus:ring-1 focus:ring-[#D81A45]/30 focus:outline-none backdrop-blur-xl transition-all shadow-inner"
+            />
+            {companySearch && (
               <button
-                key={sector}
-                onClick={() => setSelectedSector(sector)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap cursor-pointer border ${
-                  isSelected
-                    ? "bg-[rgba(216,26,69,0.15)] text-[#FF6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]"
-                    : "bg-white/[0.02] hover:bg-white/[0.05] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/5"
-                }`}
+                onClick={() => setCompanySearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg text-[#9AA0B2] hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                title="Effacer la recherche"
               >
-                <span>{sector}</span>
-                <span className="ml-1.5 opacity-60 text-[10px]">({count})</span>
+                <X className="w-3.5 h-3.5" />
               </button>
-            );
-          })}
+            )}
+          </div>
+
+          {/* Compteur de résultats & Tag */}
+          <div className="flex items-center gap-2 self-start sm:self-auto text-xs text-[#9AA0B2]">
+            <span className="px-3 py-1 rounded-full bg-white/[0.03] border border-white/10 font-semibold text-[#F5F6FA]">
+              {filteredCompanies.length} {filteredCompanies.length > 1 ? (language === "en" ? "companies" : "entreprises") : (language === "en" ? "company" : "entreprise")}
+            </span>
+          </div>
         </div>
-      )}
+
+        {/* 4. SECTOR FILTER CHIPS */}
+        {availableSectors.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none flex-nowrap">
+            <button
+              onClick={() => setSelectedSector("all")}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap cursor-pointer border ${
+                selectedSector === "all"
+                  ? "bg-white/[0.1] text-white border-white/25 shadow-[0_0_12px_rgba(255,255,255,0.08)]"
+                  : "bg-white/[0.02] hover:bg-white/[0.05] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/5"
+              }`}
+            >
+              {language === "en" ? "All Sectors" : "Tous les secteurs"} ({companies.length})
+            </button>
+            {availableSectors.map((sector) => {
+              const count = companies.filter(c => c.sector === sector).length;
+              const isSelected = selectedSector.toLowerCase() === sector.toLowerCase();
+              return (
+                <button
+                  key={sector}
+                  onClick={() => setSelectedSector(sector)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap cursor-pointer border ${
+                    isSelected
+                      ? "bg-[rgba(216,26,69,0.15)] text-[#FF6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]"
+                      : "bg-white/[0.02] hover:bg-white/[0.05] text-[#9AA0B2] hover:text-[#F5F6FA] border-white/5"
+                  }`}
+                >
+                  <span>{sector}</span>
+                  <span className="ml-1.5 opacity-60 text-[10px]">({count})</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* 4. COMPANY CARDS GRID */}
       {filteredCompanies.length === 0 ? (
@@ -383,9 +425,11 @@ export const Companies: React.FC<CompaniesProps> = ({ searchTerm, showToast, onS
                     <span className="text-[11px] text-[#9AA0B2] group-hover:text-[#F5F6FA] transition-colors font-medium">
                       {language === "en" ? "Open company workspace" : "Ouvrir l'espace entreprise"}
                     </span>
-                    <span className="text-xs font-bold text-[#FF6685] flex items-center gap-1 group-hover:translate-x-1 transition-transform">
-                      <ChevronRight className="w-4 h-4" />
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-[#FF6685] flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                        <ChevronRight className="w-4 h-4" />
+                      </span>
+                    </div>
                   </div>
                 </div>
 

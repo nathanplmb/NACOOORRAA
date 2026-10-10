@@ -7,7 +7,8 @@ import {
   Opportunity, 
   OpportunityStatus, 
   ExtractedJobInfo,
-  Company
+  Company,
+  Contact
 } from "../types";
 import { 
   Badge, 
@@ -16,6 +17,7 @@ import {
   Modal 
 } from "../components/Shared";
 import { JobExtractionModal } from "../components/JobExtractionModal";
+import { NetworkingMessageGenerator } from "../components/network/NetworkingMessageGenerator";
 import { computeOpportunityMatch } from "../api/cvFramework";
 import { 
   Plus, 
@@ -76,7 +78,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
   const [oppToDelete, setOppToDelete] = useState<Opportunity | null>(null);
-  const [activeTab, setActiveTab] = useState<"offre" | "profil" | "entreprise" | "workflow">("offre");
+  const [activeTab, setActiveTab] = useState<"offre" | "profil" | "entreprise" | "workflow" | "reseau">("offre");
   
   // Modals visibility
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -1410,8 +1412,8 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
               </div>
             </div>
 
-            {/* === 2. SEGMENTED WORKSPACE TABS (4 TABS) === */}
-            <div className="flex gap-1.5 p-1 bg-black/40 rounded-xl self-start border border-white/10 backdrop-blur-xl">
+            {/* === 2. SEGMENTED WORKSPACE TABS (5 TABS) === */}
+            <div className="flex flex-wrap gap-1.5 p-1 bg-black/40 rounded-xl self-start border border-white/10 backdrop-blur-xl">
               <button
                 onClick={() => setActiveTab("offre")}
                 className={`px-4 py-2 text-xs font-bold rounded-lg transition-spring cursor-pointer ${
@@ -1443,6 +1445,15 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                 }`}
               >
                 {language === "en" ? "Workflow & Tracking" : "Workflow & Suivi"}
+              </button>
+              <button
+                onClick={() => setActiveTab("reseau")}
+                className={`px-4 py-2 text-xs font-bold rounded-lg transition-spring cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === 'reseau' ? 'glass-pill bg-[rgba(216,26,69,0.18)] text-[#FF6685] border-[rgba(216,26,69,0.35)] shadow-[0_0_12px_rgba(216,26,69,0.2)]' : 'text-[#9AA0B2] hover:text-[#F5F6FA] hover:bg-white/5'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-[#FF6685]" />
+                {language === "en" ? "Outreach & Networking IA" : "Prise de Contact & Relances IA"}
               </button>
             </div>
 
@@ -2205,6 +2216,79 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                     </div>
                   </div>
 
+                </div>
+              )}
+
+              {/* ===== TAB 5: PRISE DE CONTACT & RELANCES IA ===== */}
+              {activeTab === "reseau" && (
+                <div className="space-y-6">
+                  {(() => {
+                    const oppRecruiterName = selectedOpp.recruiterContact?.name || "";
+                    const oppRecruiterRole = selectedOpp.recruiterContact?.role || "Responsable du Recrutement";
+                    const oppContact: Contact = {
+                      id: `opp_contact_${selectedOpp.id}`,
+                      fullName: oppRecruiterName || `Recruteur ${selectedOpp.companyName}`,
+                      firstName: oppRecruiterName ? oppRecruiterName.split(" ")[0] : "Responsable Recrutement",
+                      lastName: oppRecruiterName ? oppRecruiterName.split(" ").slice(1).join(" ") : selectedOpp.companyName,
+                      companyId: "",
+                      companyName: selectedOpp.companyName,
+                      jobTitle: oppRecruiterRole,
+                      normalizedJobTitle: oppRecruiterRole,
+                      category: "recruiter",
+                      relevanceScore: 92,
+                      connectionPoints: [`Offre ciblée : ${selectedOpp.title} (${selectedOpp.contractType})`],
+                      previousCompanies: [],
+                      email: selectedOpp.recruiterContact?.email,
+                      linkedInUrl: selectedOpp.recruiterContact?.linkedinUrl || selectedOpp.recruiterContact?.linkedin,
+                      notes: `Opportunité : ${selectedOpp.title} chez ${selectedOpp.companyName} (${selectedOpp.contractType})`,
+                      opportunityTitle: selectedOpp.title,
+                      createdAt: new Date().toISOString()
+                    };
+
+                    return (
+                      <div className="space-y-4">
+                        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-[#FF6685]" />
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-[#F5F6FA] font-display">
+                                Prise de contact ciblée pour {selectedOpp.title}
+                              </h4>
+                            </div>
+                            <p className="text-[11px] text-[#9AA0B2]">
+                              Génération contextuelle IA personnalisée selon votre profil, l'offre de {selectedOpp.companyName} et le destinataire.
+                            </p>
+                          </div>
+                          
+                          {selectedOpp.recruiterContact?.name && (
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[rgba(18,183,106,0.12)] text-[#34D399] border border-[rgba(18,183,106,0.25)] flex items-center gap-1.5 self-start sm:self-center">
+                              <UserCheck className="w-3 h-3 text-[#34D399]" />
+                              Contact RH : {selectedOpp.recruiterContact.name}
+                            </span>
+                          )}
+                        </div>
+
+                        <NetworkingMessageGenerator
+                          contact={oppContact}
+                          profile={candidateProfile}
+                          opportunity={selectedOpp}
+                          onUpdate={(updated) => {
+                            if (updated.aiCustomMessage) {
+                              const updatedOpp: Opportunity = {
+                                ...selectedOpp,
+                                notes: selectedOpp.notes 
+                                  ? `${selectedOpp.notes}\n\n[Message Réseau généré] :\n${updated.aiCustomMessage}`
+                                  : `[Message Réseau généré] :\n${updated.aiCustomMessage}`
+                              };
+                              setSelectedOpp(updatedOpp);
+                              dbStore.updateOpportunity(updatedOpp);
+                            }
+                          }}
+                          showToast={showToast}
+                        />
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

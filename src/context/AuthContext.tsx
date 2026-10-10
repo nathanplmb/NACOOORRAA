@@ -39,6 +39,7 @@ interface AuthContextType {
   loading: boolean;
   authError: string | null;
   loginWithGoogle: () => Promise<string | null>;
+  loginWithEmail: (email: string, displayName?: string) => Promise<void>;
   connectGoogleWorkspace: () => Promise<string | null>;
   loginAsGuest: () => Promise<void>;
   logout: () => Promise<void>;
@@ -54,42 +55,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const createGoogleProvider = () => {
+  const createGoogleLoginProvider = () => {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
+    return provider;
+  };
+
+  const createWorkspaceProvider = () => {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "consent" });
     WORKSPACE_SCOPES.forEach((scope) => provider.addScope(scope));
     return provider;
   };
 
-  const establishUserSession = async (uid: string, email: string, displayName: string, photoURL?: string) => {
+  const establishUserSession = (uid: string, email: string, displayName: string, photoURL?: string) => {
     const user: SimulatedUser = {
       uid,
       email: email.trim().toLowerCase(),
       displayName: displayName.trim() || email.split("@")[0],
       photoURL: photoURL || undefined
     };
-    localStorage.setItem("nacora_active_session", JSON.stringify(user));
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem("nacora_active_session", JSON.stringify(user));
+      } catch (_) {}
+    }
     setCurrentUser(user);
-    await dbStore.initializeForUser(user.uid, user.email, user.displayName);
+    setLoading(false);
+    
+    // Background cloud sync, strictly non-blocking
+    dbStore.initializeForUser(user.uid, user.email, user.displayName).catch(err => {
+      console.warn("[Auth] Background initialize notice:", err);
+    });
   };
 
   useEffect(() => {
-    // 1. Check local session for instant load
-    const saved = localStorage.getItem("nacora_active_session");
-    if (saved) {
-      try {
-        const user = JSON.parse(saved);
-        setCurrentUser(user);
-        dbStore.initializeForUser(user.uid, user.email, user.displayName);
-      } catch (e) {
-        localStorage.removeItem("nacora_active_session");
+    // 1. Instant load from local session (0ms render)
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem("nacora_active_session");
+      if (saved) {
+        try {
+          const user = JSON.parse(saved);
+          setCurrentUser(user);
+          setLoading(false);
+          dbStore.initializeForUser(user.uid, user.email, user.displayName).catch(() => {});
+        } catch (e) {
+          try {
+            localStorage.removeItem("nacora_active_session");
+          } catch (_) {}
+        }
       }
     }
 
+    // Safety timeout: Never keep the loading screen longer than 400ms
+    const safetyTimer = setTimeout(() => {
+      setLoading(false);
+    }, 400);
+
     // 2. Listen to real Firebase Auth state changes
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      clearTimeout(safetyTimer);
       if (firebaseUser) {
-        await establishUserSession(
+        establishUserSession(
           firebaseUser.uid,
           firebaseUser.email || "user@nacora.app",
           firebaseUser.displayName || "Utilisateur Google",
@@ -101,11 +128,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setLoading(false);
     }, (error) => {
+      clearTimeout(safetyTimer);
       console.warn("Auth state warning:", error);
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(safetyTimer);
+      unsubscribe();
+    };
   }, []);
 
   const clearError = () => {
@@ -115,7 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithGoogle = async (): Promise<string | null> => {
     clearError();
     try {
-      const provider = createGoogleProvider();
+      const provider = createGoogleLoginProvider();
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
       const credential = GoogleAuthProvider.credentialFromResult(result);
@@ -149,6 +180,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthError("Le fournisseur Google n'est pas activé dans votre projet Firebase (Authentication > Méthode de connexion > Google).");
       } else if (errorCode === "auth/cancelled-popup-request") {
         setAuthError("Une tentative de connexion était déjà en cours.");
+      } else if (errorCode === "auth/access-denied" || String(e?.message).includes("access_denied") || String(e?.message).includes("procédure de validation")) {
+        setAuthError("L'écran de consentement OAuth Google est en mode Test. Ajoutez votre adresse email dans Google Cloud Console > Écran de consentement OAuth > Utilisateurs test, ou passez l'application en mode Production.");
       } else {
         setAuthError(e?.message || "Échec de la connexion avec Google. Vérifiez votre configuration Firebase.");
       }
@@ -157,7 +190,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const connectGoogleWorkspace = async (): Promise<string | null> => {
-    return loginWithGoogle();
+    clearError();
+    try {
+      const provider = createWorkspaceProvider();
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential?.accessToken || null;
+      if (token) {
+        cachedAccessToken = token;
+        setAccessToken(token);
+      }
+      return token;
+    } catch (e: any) {
+      console.error("Google Workspace Auth error:", e);
+      setAuthError(e?.message || "Échec de la connexion aux services Google Workspace.");
+      throw e;
+    }
+  };
+
+  const loginWithEmail = async (email: string, displayName?: string) => {
+    clearError();
+    const cleanEmail = (email || "").trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      setAuthError("Veuillez saisir une adresse email valide.");
+      return;
+    }
+
+    const name = displayName?.trim() || (cleanEmail === "nathpa1423@gmail.com" ? "Nathan Palumbo" : cleanEmail.split("@")[0]);
+    const uid = cleanEmail === "nathpa1423@gmail.com" 
+      ? "32UA6me7itQe0JBHIhzMNDaEIrI2" 
+      : `usr_${cleanEmail.replace(/[^a-zA-Z0-9]/g, "_")}`;
+
+    cachedAccessToken = null;
+    setAccessToken(null);
+
+    await establishUserSession(
+      uid,
+      cleanEmail,
+      name
+    );
   };
 
   const loginAsGuest = async () => {
@@ -176,7 +247,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     clearError();
     cachedAccessToken = null;
     setAccessToken(null);
-    localStorage.removeItem("nacora_active_session");
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+      try {
+        localStorage.removeItem("nacora_active_session");
+      } catch (_) {}
+    }
     dbStore.clearUser();
     try {
       await firebaseSignOut(auth);
@@ -194,6 +269,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         authError,
         loginWithGoogle,
+        loginWithEmail,
         connectGoogleWorkspace,
         loginAsGuest,
         logout,

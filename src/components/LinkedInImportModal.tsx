@@ -8,6 +8,8 @@ import {
   LinkedInContactCandidate 
 } from "../utils/linkedInCsvParser";
 import { mergeContactData, getCategoryBadgeStyle } from "../utils/contactMerger";
+import { resolveCompany } from "../utils/companyResolver";
+import { classifyContactFunction, FunctionClassificationResult, StandardContactFunction } from "../utils/contactTaxonomy";
 import { 
   Upload, 
   Sparkles, 
@@ -309,9 +311,19 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
         return;
       }
 
-      // Link or create company
+      // Link or create company strictly through centralized resolver
       const companyName = item.company || "Entreprise non spécifiée";
-      const linkedCo = dbStore.getCompanyByNameOrCreate(companyName);
+      const { company: linkedCo } = resolveCompany({ companyName });
+
+      // Classify function according to centralized taxonomy
+      const funcClassification: FunctionClassificationResult = item.function && item.function !== "Inconnue"
+        ? {
+            function: item.function as StandardContactFunction,
+            functionSource: item.functionSource || "imported",
+            functionConfidence: item.functionConfidence || "high",
+            functionClassifiedAt: item.functionClassifiedAt || new Date().toISOString()
+          }
+        : classifyContactFunction(item.position, linkedCo.name);
 
       if (item.isDuplicate && item.duplicateAction === "update" && item.existingContactId) {
         // Intelligently merge existing contact with imported data
@@ -325,6 +337,10 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
             companyName: linkedCo.name,
             jobTitle: item.position || existing.jobTitle,
             normalizedJobTitle: item.normalizedJobTitle || item.position || existing.normalizedJobTitle,
+            function: funcClassification.function,
+            functionSource: funcClassification.functionSource,
+            functionConfidence: funcClassification.functionConfidence,
+            functionClassifiedAt: funcClassification.functionClassifiedAt,
             category: item.category || existing.category,
             categories: item.categories,
             professionalProfile: item.professionalProfile,
@@ -356,6 +372,10 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
         companyName: linkedCo.name,
         jobTitle: item.position || "Professionnel",
         normalizedJobTitle: item.normalizedJobTitle || item.position || "Professionnel",
+        function: funcClassification.function,
+        functionSource: funcClassification.functionSource,
+        functionConfidence: funcClassification.functionConfidence,
+        functionClassifiedAt: funcClassification.functionClassifiedAt,
         category: item.category || "other",
         categories: item.categories || [],
         professionalProfile: item.professionalProfile,
@@ -873,7 +893,7 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
                             </div>
 
                             {/* Job & Company Input Fields */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
                               <div className="flex items-center gap-1.5 text-xs text-[#9AA0B2]">
                                 <Briefcase className="w-3 h-3 text-[#ff6685] shrink-0" />
                                 <input
@@ -883,6 +903,13 @@ export const LinkedInImportModal: React.FC<LinkedInImportModalProps> = ({
                                   className="w-full glass-input px-2 py-0.5 text-xs text-[#F5F6FA] border-white/10"
                                   placeholder="Poste normalisé"
                                 />
+                              </div>
+
+                              <div className="flex items-center gap-1.5 text-xs text-[#9AA0B2]">
+                                <Sparkles className="w-3 h-3 text-[#C084FC] shrink-0" />
+                                <span className="text-xs font-semibold text-[#C084FC] truncate" title={`Fonction normalisée : ${candidate.function || "À préciser"}`}>
+                                  {candidate.function && candidate.function !== "Inconnue" ? candidate.function : "Fonction à préciser"}
+                                </span>
                               </div>
 
                               <div className="flex items-center gap-1.5 text-xs text-[#9AA0B2]">

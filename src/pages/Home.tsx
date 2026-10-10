@@ -55,20 +55,27 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
     setContacts(c);
 
     // Check cached brief in localStorage
-    const cached = localStorage.getItem(STORAGE_KEY);
-    if (cached) {
+    let loadedBrief = false;
+    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
       try {
-        setBriefData(JSON.parse(cached));
+        const cached = localStorage.getItem(STORAGE_KEY);
+        if (cached) {
+          setBriefData(JSON.parse(cached));
+          loadedBrief = true;
+        }
       } catch (err) {
         console.warn("Erreur de lecture du Daily Brief en cache:", err);
-        const initial = generateLocalDailyBrief({ profile: p, opportunities: o, contacts: c, calendarEvents: e });
-        setBriefData(initial);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
       }
-    } else {
+    }
+
+    if (!loadedBrief) {
       const initial = generateLocalDailyBrief({ profile: p, opportunities: o, contacts: c, calendarEvents: e });
       setBriefData(initial);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
+      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
+        } catch (_) {}
+      }
     }
 
     const unsub = dbStore.subscribe(() => {
@@ -106,7 +113,11 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
       const data: DailyBriefData = await response.json();
       if (data && data.summaryText && Array.isArray(data.actions)) {
         setBriefData(data);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+          } catch (_) {}
+        }
         showToast(language === "en" ? "Your daily overview has been successfully refreshed!" : "Votre synthèse a été mise à jour avec succès !", "success");
       } else {
         throw new Error("Invalid structure returned");
@@ -115,7 +126,11 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
       console.warn("[Home] Fallback local lors de la régénération du brief:", err);
       const fallback = generateLocalDailyBrief(payload);
       setBriefData(fallback);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
+      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
+        } catch (_) {}
+      }
       showToast(language === "en" ? "Summary updated from your recent data." : "Synthèse mise à jour à partir de vos données récentes.", "info");
     } finally {
       setIsRegenerating(false);
@@ -332,9 +347,13 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
                   <button
                     onClick={() => {
                       setChallengeAnswered(false);
-                      localStorage.setItem("nacora_initial_ai_prompt", language === "en" 
-                        ? "I haven't reached out to my priority network contact this week. Can you help me prepare my hook and identify the best target?" 
-                        : "Je n'ai pas encore réalisé mon contact réseau prioritaire cette semaine. Peux-tu m'aider à préparer mon accroche et identifier la meilleure cible ?");
+                      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+                        try {
+                          localStorage.setItem("nacora_initial_ai_prompt", language === "en" 
+                            ? "I haven't reached out to my priority network contact this week. Can you help me prepare my hook and identify the best target?" 
+                            : "Je n'ai pas encore réalisé mon contact réseau prioritaire cette semaine. Peux-tu m'aider à préparer mon accroche et identifier la meilleure cible ?");
+                        } catch (_) {}
+                      }
                       showToast(language === "en" ? "Opening Networking Module to structure your approach..." : "Accès au module Réseau pour préparer votre prise de contact...", "info");
                       onNavigate("hub_ia", "networking");
                     }}
@@ -352,9 +371,13 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
               ) : (
                 <button
                   onClick={() => {
-                    localStorage.setItem("nacora_initial_ai_prompt", language === "en" 
-                      ? "I haven't reached out to my priority network contact this week. Can you help me prepare my hook and identify the best target?" 
-                      : "Je n'ai pas encore réalisé mon contact réseau prioritaire cette semaine. Peux-tu m'aider à préparer mon accroche et identifier la meilleure cible ?");
+                    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+                      try {
+                        localStorage.setItem("nacora_initial_ai_prompt", language === "en" 
+                          ? "I haven't reached out to my priority network contact this week. Can you help me prepare my hook and identify the best target?" 
+                          : "Je n'ai pas encore réalisé mon contact réseau prioritaire cette semaine. Peux-tu m'aider à préparer mon accroche et identifier la meilleure cible ?");
+                      } catch (_) {}
+                    }
                     onNavigate("hub_ia", "networking");
                   }}
                   className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-purple-500/20 border border-purple-500/30 text-[#C084FC] hover:bg-purple-500/30 transition-all cursor-pointer flex items-center gap-1.5"
