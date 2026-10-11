@@ -41,10 +41,13 @@ export const AuthScreen: React.FC<{ onOpenPrivacy?: () => void; onOpenTerms?: ()
   const handleGoogleLogin = async () => {
     clearError();
     setIsLoading(true);
+    console.log("[Auth] Starting Google login process...");
+    const start = Date.now();
     try {
       await loginWithGoogle();
+      console.log(`[Auth] Google login completed in ${Date.now() - start}ms`);
     } catch (e) {
-      console.error("Login attempt error:", e);
+      console.error("[Auth] Login attempt error:", e);
     } finally {
       setIsLoading(false);
     }
@@ -104,51 +107,15 @@ export const AuthScreen: React.FC<{ onOpenPrivacy?: () => void; onOpenTerms?: ()
             </p>
           </div>
 
-          {/* 1. Primary Direct Access for Nathan Palumbo */}
-          <button
-            type="button"
-            onClick={handleNathanLogin}
-            disabled={isLoading || isNathanLoading || isGuestLoading || isEmailLoading}
-            className="w-full relative group overflow-hidden rounded-2xl bg-gradient-to-r from-[#D81A45]/20 via-[#D81A45]/10 to-transparent hover:from-[#D81A45]/30 hover:to-white/[0.05] border border-[#D81A45]/40 py-3.5 px-4 transition-all duration-300 flex items-center justify-between shadow-[0_0_25px_rgba(216,26,69,0.15)] cursor-pointer active:scale-[0.98]"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-[#D81A45] flex items-center justify-center font-bold text-white shadow-md text-sm">
-                NP
-              </div>
-              <div className="text-left">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-white">Nathan Palumbo</span>
-                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-[#D81A45]/30 text-[#FF6685] border border-[#D81A45]/50">
-                    ADMIN
-                  </span>
-                </div>
-                <span className="text-[11px] text-[#9AA0B2] font-mono">nathpa1423@gmail.com</span>
-              </div>
-            </div>
-
-            {isNathanLoading ? (
-              <Loader2 className="w-4 h-4 text-[#FF6685] animate-spin" />
-            ) : (
-              <ArrowRight className="w-4 h-4 text-[#FF6685] group-hover:translate-x-1 transition-transform" />
-            )}
-          </button>
-
-          {/* Separator */}
-          <div className="flex items-center gap-3 my-2 text-[#9AA0B2]/50 text-[11px] font-mono">
-            <div className="flex-1 h-[1px] bg-white/10" />
-            <span>OU</span>
-            <div className="flex-1 h-[1px] bg-white/10" />
-          </div>
-
-          {/* 2. Google OAuth Button */}
+          {/* 1. Google OAuth Button */}
           <button
             type="button"
             onClick={handleGoogleLogin}
-            disabled={isLoading || isNathanLoading || isGuestLoading || isEmailLoading}
-            className="w-full relative group overflow-hidden rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 py-3 px-4 transition-all duration-300 flex items-center justify-center space-x-3 shadow-md cursor-pointer active:scale-[0.98]"
+            disabled={isLoading || isGuestLoading || isEmailLoading}
+            className="w-full relative group overflow-hidden rounded-2xl bg-[#D81A45]/15 hover:bg-[#D81A45]/25 border border-[#D81A45]/40 py-3.5 px-4 transition-all duration-300 flex items-center justify-center space-x-3 shadow-[0_0_20px_rgba(216,26,69,0.15)] cursor-pointer active:scale-[0.98]"
           >
             {isLoading ? (
-              <Loader2 className="w-4 h-4 text-[#D81A45] animate-spin" />
+              <Loader2 className="w-4 h-4 text-[#FF6685] animate-spin" />
             ) : (
               <>
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -169,12 +136,19 @@ export const AuthScreen: React.FC<{ onOpenPrivacy?: () => void; onOpenTerms?: ()
                     d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.23 0 3.17 2.64 1.19 6.58l4.09 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
                   />
                 </svg>
-                <span className="text-xs font-semibold text-white tracking-wide">
-                  Connexion avec Google OAuth
+                <span className="text-xs font-bold text-white tracking-wide">
+                  Se connecter avec Google
                 </span>
               </>
             )}
           </button>
+
+          {/* Separator */}
+          <div className="flex items-center gap-3 my-2 text-[#9AA0B2]/50 text-[11px] font-mono">
+            <div className="flex-1 h-[1px] bg-white/10" />
+            <span>OU PAR E-MAIL</span>
+            <div className="flex-1 h-[1px] bg-white/10" />
+          </div>
 
           {/* 3. Direct Email Input toggle */}
           {showEmailInput ? (

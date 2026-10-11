@@ -102,7 +102,7 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
           priority: "urgent",
           badge: "Réponse reçue",
           badgeClass: "bg-purple-500/20 text-[#C084FC] border-purple-500/35",
-          appLabel: "Messagerie · Réseau",
+          appLabel: "Networking",
           targetView: "messages",
           targetId: c.id
         });

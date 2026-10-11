@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
-import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { 
   extractJobDetails, 
@@ -322,11 +321,12 @@ async function startServer() {
         case "chat":
           resultData = { 
             response: await handlePersonaChat(
-              payload.personaId, 
-              payload.messages, 
-              payload.profile, 
-              payload.activeFocus, 
-              payload.contextSummary
+              payload.personaId,
+              payload.messages,
+              payload.profile,
+              payload.activeFocus,
+              payload.contextSummary,
+              payload.intent
             ) 
           };
           break;
@@ -371,18 +371,17 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const distPath = path.join(__dirname, "dist");
+    const distPath = path.resolve(process.cwd(), "dist");
+    console.log(`[NACORA Server] Serving production static files from: ${distPath}`);
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[NACORA Server] Running at http://localhost:${PORT}`);
+    console.log(`[NACORA Server] Listening on 0.0.0.0:${PORT}`);
     console.log(`[NACORA Server] Environment: ${process.env.NODE_ENV || 'development'}`);
     const key = process.env.GEMINI_API_KEY;
     if (key) {

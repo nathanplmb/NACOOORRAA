@@ -503,3 +503,36 @@ export function mergeContactData(existing: Contact, incoming: Partial<Contact>):
 
   return merged;
 }
+
+/**
+ * Règle d'identification d'une vraie conversation Networking :
+ * Un contact possède une véritable conversation s'il a au moins un message réel
+ * consigné ou importé (ex: LinkedIn, Email, import CSV) avec un contenu textuel non vide.
+ * Les brouillons (status === 'draft') ou les conversations vides ne sont pas comptabilisés.
+ */
+export function hasRealConversation(contact: Contact | null | undefined): boolean {
+  if (!contact) return false;
+
+  // 1. Vérifier la collection de messages de conversation
+  if (Array.isArray(contact.conversationMessages) && contact.conversationMessages.length > 0) {
+    const hasRealMsg = contact.conversationMessages.some(m => {
+      if (!m || !m.text || !m.text.trim()) return false;
+      // Les brouillons ne comptent pas comme un message réel
+      if (m.status === "draft") return false;
+      return true;
+    });
+    if (hasRealMsg) return true;
+  }
+
+  // 2. Vérifier les journaux d'envois enregistrés (outreach messages log)
+  if (Array.isArray(contact.outreachMessagesLog) && contact.outreachMessagesLog.length > 0) {
+    const hasRealLog = contact.outreachMessagesLog.some(l => {
+      if (!l || !l.message || !l.message.trim()) return false;
+      if (l.status === "draft") return false;
+      return true;
+    });
+    if (hasRealLog) return true;
+  }
+
+  return false;
+}

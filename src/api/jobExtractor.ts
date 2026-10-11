@@ -15,6 +15,23 @@ export const RecruitmentStepSchema = z.object({
 
 export type RecruitmentStep = z.infer<typeof RecruitmentStepSchema>;
 
+export const ExtractedContactSchema = z.object({
+  id: z.string().optional(),
+  firstName: z.string().nullable().default(null),
+  lastName: z.string().nullable().default(null),
+  fullName: z.string().min(1, "Le nom complet est requis"),
+  role: z.string().nullable().default(null),
+  email: z.string().nullable().default(null),
+  phone: z.string().nullable().default(null),
+  linkedinUrl: z.string().nullable().default(null),
+  company: z.string().nullable().default(null),
+  categoryRole: z.string().default("Recruteur"),
+  notes: z.string().nullable().default(null),
+  isPrimary: z.boolean().default(false)
+});
+
+export type ExtractedContact = z.infer<typeof ExtractedContactSchema>;
+
 export const ExtractedJobOfferSchema = z.object({
   // Informations de base
   title: z.string().min(1, "Le titre est requis"),
@@ -66,7 +83,10 @@ export const ExtractedJobOfferSchema = z.object({
   benefits: z.array(z.string()).default([]),
 
   // Processus de recrutement
-  recruitmentSteps: z.array(RecruitmentStepSchema).default([])
+  recruitmentSteps: z.array(RecruitmentStepSchema).default([]),
+
+  // Contacts / Personnes identifiées dans l'offre
+  extractedContacts: z.array(ExtractedContactSchema).default([])
 });
 
 export type ExtractedJobOffer = z.infer<typeof ExtractedJobOfferSchema>;
@@ -176,6 +196,27 @@ export const geminiJobOfferResponseSchema = {
         required: ["order", "description"]
       },
       description: "Étapes ordonnées du processus de recrutement (interlocuteur, durée le cas échéant)"
+    },
+    extractedContacts: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          firstName: { type: "STRING", nullable: true },
+          lastName: { type: "STRING", nullable: true },
+          fullName: { type: "STRING", description: "Nom complet de la personne (Prénom Nom)" },
+          role: { type: "STRING", description: "Poste ou fonction exacte de la personne (ex: Tutrice de stage, Chargée de Recrutement RH, Directeur)", nullable: true },
+          email: { type: "STRING", description: "Adresse e-mail directe si mentionnée dans le texte", nullable: true },
+          phone: { type: "STRING", description: "Numéro de téléphone direct si mentionné", nullable: true },
+          linkedinUrl: { type: "STRING", description: "URL ou identifiant de profil LinkedIn si disponible", nullable: true },
+          company: { type: "STRING", description: "Entreprise de rattachement de la personne", nullable: true },
+          categoryRole: { type: "STRING", description: "Type d'interlocuteur (Recruteur, Tuteur, HR Manager, Contact réseau, Manager)", nullable: true },
+          notes: { type: "STRING", description: "Contexte d'intervention de la personne dans l'offre", nullable: true },
+          isPrimary: { type: "BOOLEAN", description: "Vrai s'il s'agit du contact principal / recruteur attaché à l'offre" }
+        },
+        required: ["fullName"]
+      },
+      description: "Liste de toutes les personnes physiques explicitement nommées ou identifiées dans l'offre (tutrice, recruteur, manager, contact RH, etc.)"
     }
   },
   required: [
@@ -190,7 +231,8 @@ export const geminiJobOfferResponseSchema = {
     "companyName",
     "companyMetrics",
     "benefits",
-    "recruitmentSteps"
+    "recruitmentSteps",
+    "extractedContacts"
   ]
 };
 
@@ -269,6 +311,19 @@ RÈGLES ABSOLUES ET DIRECTIVES D'EXTRACTION :
 9. TYPE DE CONTRAT & DURÉE :
    - Type : Stage, Alternance, CDD, CDI, VIE, Freelance.
    - Priorité absolue Stage vs VIE : un stage à l'international reste un "Stage" sauf mention explicite de la formule V.I.E.
+
+10. PERSONNES ET CONTACTS MENTIONNÉS (extractedContacts) :
+   - Analyser le texte à la recherche de TOUTE personne physique identifiée ou nommée dans l'offre (ex: tutrice de stage, responsable recrutement, manager d'équipe, contact RH pour envoi de candidature, tuteur AMF, interlocuteur lors des entretiens).
+   - Pour chaque personne identifiée, extraire :
+     * fullName: Prénom et Nom (ex: "Sophie Martin", "Alexandre Dubois"). Si seul un prénom et nom sont présents (ex: "Contact : Claire Dupont"), extrais-les.
+     * firstName / lastName: Déduire le prénom et le nom.
+     * role: La fonction ou le rôle exact (ex: "Tutrice de stage / Directrice Patrimoine", "Responsable Recrutement RH", "Directeur d'Agence").
+     * email: L'adresse e-mail directe si mentionnée (ex: "s.martin@natixis.fr", "recrutement@finoria.fr").
+     * phone: Numéro de téléphone direct si présent.
+     * linkedinUrl: Profil LinkedIn ou identifiant si mentionné.
+     * company: L'entreprise rattachée.
+     * categoryRole: Categorie ("Recruteur", "Tuteur", "HR Manager", "Contact réseau", "Manager").
+     * isPrimary: Marquer 'true' pour le contact principal de candidature ou la tutrice/recruteur principal.
 
 Renvoie UNIQUEMENT le JSON valide correspondant à la structure requise.`;
 
@@ -594,6 +649,50 @@ export function extractWithLocalHeuristics(rawText: string, sourceUrl?: string):
   const dlMatch = cleaned.match(/(?:date limite|avant le|clôture)\s*:\s*([0-9]{1,2}[\/\-\s][0-9]{1,2}[\/\-\s][0-9]{2,4}|[0-9]{1,2}\s+[A-Za-zÀ-ÿ]+\s+[0-9]{4})/i);
   if (dlMatch) applicationDeadline = dlMatch[1].trim();
 
+  // 11. Heuristique Contacts
+  const extractedContacts: ExtractedContact[] = [];
+  const emailMatches = cleaned.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g);
+  if (emailMatches && emailMatches.length > 0) {
+    emailMatches.forEach((email, idx) => {
+      // Look for a name near the email line
+      const emailLine = lines.find(l => l.includes(email));
+      let nameCandidate = "";
+      if (emailLine) {
+        const lineWithoutEmail = emailLine.replace(email, "").replace(/(candidature|contact|envoyer|cv|lettre|email|e-mail|\:|\-)/gi, "").trim();
+        if (lineWithoutEmail.length > 2 && lineWithoutEmail.length < 50) {
+          nameCandidate = lineWithoutEmail;
+        }
+      }
+      if (!nameCandidate) {
+        const parts = email.split("@")[0].split(/[._-]/);
+        if (parts.length >= 2) {
+          nameCandidate = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(" ");
+        } else {
+          nameCandidate = `Contact Recrutement (${company})`;
+        }
+      }
+
+      const parts = nameCandidate.split(" ");
+      const firstName = parts[0] || null;
+      const lastName = parts.slice(1).join(" ") || null;
+
+      extractedContacts.push({
+        id: `ext_${idx}_${Date.now()}`,
+        firstName,
+        lastName,
+        fullName: nameCandidate,
+        role: "Chargé(e) de recrutement / Contact RH",
+        email: email,
+        phone: null,
+        linkedinUrl: null,
+        company: company,
+        categoryRole: "Recruteur",
+        notes: "Contact extrait depuis l'adresse email de l'offre.",
+        isPrimary: idx === 0
+      });
+    });
+  }
+
   return {
     title,
     company,
@@ -627,7 +726,8 @@ export function extractWithLocalHeuristics(rawText: string, sourceUrl?: string):
     companySize: null,
     companyMetrics: [],
     benefits: [],
-    recruitmentSteps: []
+    recruitmentSteps: [],
+    extractedContacts
   };
 }
 
@@ -755,7 +855,8 @@ export async function extractJobOfferWithCascade(
           requiredLanguages: Array.isArray(parsedJson.requiredLanguages) ? parsedJson.requiredLanguages : [],
           companyMetrics: Array.isArray(parsedJson.companyMetrics) ? parsedJson.companyMetrics : [],
           benefits: Array.isArray(parsedJson.benefits) ? parsedJson.benefits : [],
-          recruitmentSteps: Array.isArray(parsedJson.recruitmentSteps) ? parsedJson.recruitmentSteps : []
+          recruitmentSteps: Array.isArray(parsedJson.recruitmentSteps) ? parsedJson.recruitmentSteps : [],
+          extractedContacts: Array.isArray(parsedJson.extractedContacts) ? parsedJson.extractedContacts : []
         } as ExtractedJobOffer;
       }
 

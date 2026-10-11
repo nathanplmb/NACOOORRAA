@@ -32,17 +32,23 @@ import {
   Calendar as CalendarIcon,
   Sparkles,
   Loader2,
-  CheckCircle2
+  CheckCircle2,
+  User
 } from "lucide-react";
 
-type FilterType = "all" | "interview" | "deadline" | "follow_up" | "google";
+type FilterType = "all" | "interview" | "deadline" | "follow_up" | "task" | "google";
+
+interface CalendarProps {
+  onNavigateToOpportunity?: (oppId: string) => void;
+  onNavigateToContact?: (contactId: string) => void;
+}
 
 const DAYS_OF_WEEK_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const DAYS_OF_WEEK_SHORT_FR = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const DAYS_OF_WEEK_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const DAYS_OF_WEEK_SHORT_EN = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-export const Calendar: React.FC = () => {
+export const Calendar: React.FC<CalendarProps> = ({ onNavigateToOpportunity, onNavigateToContact }) => {
   const { language, t } = useLanguage();
   const { accessToken } = useAuth();
   
@@ -508,7 +514,7 @@ export const Calendar: React.FC = () => {
     }
   };
 
-  // Type styling helpers
+  // Type & Status styling helpers
   const getTypeBadgeStyle = (type: CalendarEvent["type"], isGoogle?: boolean) => {
     if (isGoogle) {
       return {
@@ -537,12 +543,56 @@ export const Calendar: React.FC = () => {
           dot: "bg-[#FBBF24]",
           label: language === "en" ? "Follow-up" : "Relance"
         };
+      case "meeting":
+        return {
+          pill: "bg-sky-950/50 text-[#38BDF8] border-sky-500/35",
+          dot: "bg-[#38BDF8]",
+          label: language === "en" ? "Meeting" : "Rendez-vous"
+        };
+      case "task":
+        return {
+          pill: "bg-emerald-950/50 text-[#34D399] border-emerald-500/35",
+          dot: "bg-[#34D399]",
+          label: language === "en" ? "Task" : "Tâche"
+        };
+      case "preparation":
+        return {
+          pill: "bg-indigo-950/50 text-indigo-300 border-indigo-500/35",
+          dot: "bg-indigo-400",
+          label: language === "en" ? "Preparation" : "Préparation"
+        };
       default:
         return {
           pill: "bg-white/[0.04] text-[#9AA0B2] border-white/10",
           dot: "bg-[#9AA0B2]",
           label: language === "en" ? "Reminder" : "Rappel"
         };
+    }
+  };
+
+  const getSyncStatusBadgeStyle = (status?: CalendarEvent["syncStatus"]) => {
+    switch (status) {
+      case "confirmed":
+        return { pill: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30", label: "Confirmé" };
+      case "calculated":
+        return { pill: "bg-blue-500/15 text-blue-400 border-blue-500/30", label: "Calculé" };
+      case "ai_suggestion":
+        return { pill: "bg-purple-500/15 text-purple-300 border-purple-500/30", label: "Suggestion IA" };
+      default:
+        return null;
+    }
+  };
+
+  const getPriorityBadgeStyle = (priority?: CalendarEvent["priority"]) => {
+    switch (priority) {
+      case "high":
+        return { pill: "bg-rose-500/20 text-rose-300 border-rose-500/30", label: "Priorité Haute" };
+      case "medium":
+        return { pill: "bg-amber-500/20 text-amber-300 border-amber-500/30", label: "Priorité Moyenne" };
+      case "low":
+        return { pill: "bg-slate-500/20 text-slate-300 border-slate-500/30", label: "Priorité Basse" };
+      default:
+        return null;
     }
   };
 
@@ -1142,6 +1192,55 @@ export const Calendar: React.FC = () => {
                     </div>
                   </div>
                 )}
+
+                {/* Status & Priority Badges */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {getSyncStatusBadgeStyle(selectedEvent.syncStatus) && (
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getSyncStatusBadgeStyle(selectedEvent.syncStatus)?.pill}`}>
+                      {getSyncStatusBadgeStyle(selectedEvent.syncStatus)?.label}
+                    </span>
+                  )}
+                  {getPriorityBadgeStyle(selectedEvent.priority) && (
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getPriorityBadgeStyle(selectedEvent.priority)?.pill}`}>
+                      {getPriorityBadgeStyle(selectedEvent.priority)?.label}
+                    </span>
+                  )}
+                </div>
+
+                {/* Source Navigation Action Buttons */}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {(selectedEvent.opportunityId || (selectedEvent.sourceType === 'opportunity' && selectedEvent.sourceId)) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDetailOpen(false);
+                        const oppId = selectedEvent.opportunityId || selectedEvent.sourceId;
+                        if (onNavigateToOpportunity && oppId) onNavigateToOpportunity(oppId);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-[#38BDF8]/10 hover:bg-[#38BDF8]/20 border border-[#38BDF8]/30 text-[#38BDF8] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Briefcase className="w-3.5 h-3.5" />
+                      <span>Accéder à la fiche Opportunité</span>
+                      <ArrowRight className="w-3 h-3 ml-0.5" />
+                    </button>
+                  )}
+
+                  {(selectedEvent.contactId || (selectedEvent.sourceType === 'contact' && selectedEvent.sourceId)) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsDetailOpen(false);
+                        const cId = selectedEvent.contactId || selectedEvent.sourceId;
+                        if (onNavigateToContact && cId) onNavigateToContact(cId);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-[#C084FC] text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <User className="w-3.5 h-3.5" />
+                      <span>Accéder à la fiche Contact</span>
+                      <ArrowRight className="w-3 h-3 ml-0.5" />
+                    </button>
+                  )}
+                </div>
 
                 {/* Notes */}
                 {selectedEvent.notes && (

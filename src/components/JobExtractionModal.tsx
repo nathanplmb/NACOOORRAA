@@ -25,16 +25,28 @@ import {
   Zap,
   Info,
   CalendarClock,
-  Languages
+  Languages,
+  Users,
+  UserCheck,
+  UserPlus,
+  CheckSquare,
+  Square
 } from "lucide-react";
 import { Modal, GlassButton, Badge } from "./Shared";
 import { 
   ExtractedJobOffer, 
+  ExtractedContact,
   ExtractionResult, 
   calculateCompletenessScore 
 } from "../api/jobExtractor";
 import { dbStore } from "../dbStore";
-import { Opportunity, OpportunityStatus, ExtractedJobInfo } from "../types";
+import { resolveContact } from "../utils/contactResolver";
+import { Opportunity, OpportunityStatus, ExtractedJobInfo, Contact, RecruiterContact } from "../types";
+
+export interface UIContactItem extends ExtractedContact {
+  isSelected: boolean;
+  existingMatch?: Contact | null;
+}
 
 interface JobExtractionModalProps {
   isOpen: boolean;
@@ -77,6 +89,7 @@ export const JobExtractionModal: React.FC<JobExtractionModalProps> = ({
 
   // Editable Form State (initialized from extraction result)
   const [formOffer, setFormOffer] = useState<ExtractedJobOffer | null>(null);
+  const [editableContacts, setEditableContacts] = useState<UIContactItem[]>([]);
   const [targetStatus, setTargetStatus] = useState<OpportunityStatus>(
     existingOpportunity ? existingOpportunity.status : "to_prepare"
   );
@@ -107,6 +120,7 @@ export const JobExtractionModal: React.FC<JobExtractionModalProps> = ({
     setUrlScrapingError(null);
     setExtractionResult(null);
     setFormOffer(null);
+    setEditableContacts([]);
     setShowRawJson(false);
     onClose();
   };
@@ -255,6 +269,17 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
     }
   };
 
+  const findMatchingContact = (c: { fullName?: string; email?: string; linkedinUrl?: string; company?: string }): Contact | null => {
+    const allContacts = dbStore.getContacts();
+    const res = resolveContact({
+      fullName: c.fullName,
+      email: c.email || undefined,
+      linkedInUrl: c.linkedinUrl || undefined,
+      companyName: c.company
+    }, allContacts);
+    return res.matchedContact;
+  };
+
   // --------------------------------------------------------------------------
   // TRIGGER AI EXTRACTION PIPELINE (CASCADE DE MODÈLES & FALLBACK)
   // --------------------------------------------------------------------------
@@ -287,6 +312,28 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
       const result: ExtractionResult = await response.json();
       setExtractionResult(result);
       setFormOffer(result.data);
+
+      // Initialize extracted contacts review list with matching checks
+      const extractedList: ExtractedContact[] = Array.isArray(result.data.extractedContacts) ? result.data.extractedContacts : [];
+      const uiContacts: UIContactItem[] = extractedList.map((c, idx) => {
+        const match = findMatchingContact({
+          fullName: c.fullName,
+          email: c.email || undefined,
+          linkedinUrl: c.linkedinUrl || undefined,
+          company: c.company || result.data.company
+        });
+        const nameParts = (c.fullName || "").trim().split(" ");
+        return {
+          ...c,
+          firstName: c.firstName || nameParts[0] || "",
+          lastName: c.lastName || nameParts.slice(1).join(" ") || "",
+          company: c.company || result.data.company,
+          isSelected: true,
+          isPrimary: c.isPrimary || idx === 0,
+          existingMatch: match
+        };
+      });
+      setEditableContacts(uiContacts);
       setStep("review");
 
       const completeness = calculateCompletenessScore(result.data);
@@ -500,6 +547,61 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
   };
 
   // --------------------------------------------------------------------------
+  // CONTACTS MANAGEMENT HANDLERS
+  // --------------------------------------------------------------------------
+  const handleToggleContactSelect = (index: number) => {
+    const updated = [...editableContacts];
+    updated[index] = { ...updated[index], isSelected: !updated[index].isSelected };
+    setEditableContacts(updated);
+  };
+
+  const handleSetPrimaryContact = (index: number) => {
+    const updated = editableContacts.map((c, i) => ({
+      ...c,
+      isPrimary: i === index
+    }));
+    setEditableContacts(updated);
+  };
+
+  const handleUpdateContactField = (index: number, field: keyof UIContactItem, value: any) => {
+    const updated = [...editableContacts];
+    const item = { ...updated[index], [field]: value };
+    if (field === "fullName") {
+      item.existingMatch = findMatchingContact({
+        fullName: value,
+        email: item.email || undefined,
+        linkedinUrl: item.linkedinUrl || undefined,
+        company: item.company || formOffer?.company
+      });
+    }
+    updated[index] = item;
+    setEditableContacts(updated);
+  };
+
+  const handleRemoveContactItem = (index: number) => {
+    setEditableContacts(editableContacts.filter((_, i) => i !== index));
+  };
+
+  const handleAddManualContactItem = () => {
+    const newC: UIContactItem = {
+      fullName: "Nouveau Contact",
+      firstName: "Nouveau",
+      lastName: "Contact",
+      role: "Recruteur / Tuteur",
+      email: "",
+      phone: "",
+      linkedinUrl: "",
+      company: formOffer?.company || "",
+      categoryRole: "Recruteur",
+      notes: "",
+      isSelected: true,
+      isPrimary: editableContacts.length === 0,
+      existingMatch: null
+    };
+    setEditableContacts([...editableContacts, newC]);
+  };
+
+  // --------------------------------------------------------------------------
   // FINAL VALIDATION & SAVE TO FIRESTORE / STORE
   // --------------------------------------------------------------------------
   const handleSaveOpportunity = async () => {
@@ -568,6 +670,79 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
           ]
     };
 
+    // Process selected contacts
+    const syncedContactsCount: number[] = [];
+    let primaryRecruiter: RecruiterContact | undefined = undefined;
+
+    for (const cItem of editableContacts) {
+      if (!cItem.isSelected || !cItem.fullName.trim()) continue;
+
+      const match = findMatchingContact({
+        fullName: cItem.fullName,
+        email: cItem.email || undefined,
+        linkedinUrl: cItem.linkedinUrl || undefined,
+        company: cItem.company || formOffer.company
+      });
+
+      let savedContact: Contact;
+      if (match) {
+        dbStore.updateContact({
+          ...match,
+          jobTitle: cItem.role || match.jobTitle,
+          email: cItem.email || match.email,
+          phone: cItem.phone || match.phone,
+          linkedInUrl: cItem.linkedinUrl || match.linkedInUrl,
+          companyName: cItem.company || match.companyName
+        });
+        savedContact = {
+          ...match,
+          jobTitle: cItem.role || match.jobTitle,
+          email: cItem.email || match.email,
+          phone: cItem.phone || match.phone,
+          linkedInUrl: cItem.linkedinUrl || match.linkedInUrl,
+          companyName: cItem.company || match.companyName
+        };
+      } else {
+        const nameParts = cItem.fullName.trim().split(" ");
+        const firstName = cItem.firstName || nameParts[0] || "";
+        const lastName = cItem.lastName || nameParts.slice(1).join(" ") || "";
+        const roleTitle = cItem.role || "Recruteur";
+
+        savedContact = dbStore.addContact({
+          fullName: cItem.fullName.trim(),
+          firstName,
+          lastName,
+          jobTitle: roleTitle,
+          normalizedJobTitle: roleTitle,
+          companyName: cItem.company || formOffer.company,
+          companyId: company.id,
+          category: cItem.categoryRole?.toLowerCase().includes("tuteur") ? "alumni" : "recruiter",
+          relevanceScore: 90,
+          connectionPoints: [`Contact extrait depuis l'offre "${formOffer.title}" chez ${formOffer.company}`],
+          previousCompanies: [],
+          notes: cItem.notes || `Contact extrait de l'offre "${formOffer.title}" chez ${formOffer.company}`,
+          email: cItem.email || undefined,
+          phone: cItem.phone || undefined,
+          linkedInUrl: cItem.linkedinUrl || undefined
+        });
+      }
+
+      syncedContactsCount.push(1);
+
+      if (cItem.isPrimary || !primaryRecruiter) {
+        primaryRecruiter = {
+          id: savedContact.id,
+          contactId: savedContact.id,
+          name: `${savedContact.firstName} ${savedContact.lastName}`.trim(),
+          role: savedContact.jobTitle,
+          email: savedContact.email,
+          phone: savedContact.phone,
+          linkedin: savedContact.linkedInUrl,
+          linkedinUrl: savedContact.linkedInUrl
+        };
+      }
+    }
+
     let savedOpp: Opportunity;
 
     if (existingOpportunity) {
@@ -586,12 +761,16 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
         url: sourceUrl || existingOpportunity.url || undefined,
         status: targetStatus,
         notes: rawText ? rawText.substring(0, 500) + "..." : existingOpportunity.notes,
+        recruiterContact: primaryRecruiter || existingOpportunity.recruiterContact,
         aiExtracted: true,
         extractedInfo: extractedInfo,
         updatedAt: new Date().toISOString()
       };
       dbStore.updateOpportunity(savedOpp);
-      showToast(`Opportunité "${formOffer.title}" ré-extraite et mise à jour !`, "success");
+      showToast(
+        `Opportunité "${formOffer.title}" mise à jour${syncedContactsCount.length > 0 ? ` (+${syncedContactsCount.length} contact(s) synchro)` : ""} !`,
+        "success"
+      );
     } else {
       // New opportunity creation
       savedOpp = dbStore.addOpportunity({
@@ -607,10 +786,14 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
         deadline: formOffer.applicationDeadline || undefined,
         url: sourceUrl || undefined,
         notes: rawText ? rawText.substring(0, 500) + "..." : "Offre extraite par IA.",
+        recruiterContact: primaryRecruiter,
         aiExtracted: true,
         extractedInfo: extractedInfo
       });
-      showToast(`Opportunité "${formOffer.title}" enregistrée dans vos candidatures !`, "success");
+      showToast(
+        `Opportunité "${formOffer.title}" enregistrée${syncedContactsCount.length > 0 ? ` (+${syncedContactsCount.length} contact(s) créés)` : ""} !`,
+        "success"
+      );
     }
 
     if (onSuccess) onSuccess(savedOpp);
@@ -1578,7 +1761,180 @@ Diplôme souhaité : BUT TC, Licence Pro Banque ou Master 1 Finance.`);
               </div>
             </div>
 
-            {/* 6. COLONNE KANBAN DE DESTINATION */}
+            {/* 6. CONTACTS & INTERLOCUTEURS DÉTECTÉS PAR L'IA */}
+            <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5" />
+                    6. Contacts & Interlocuteurs Détectés dans l'Offre ({editableContacts.length})
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    L'IA a identifié ces personnes dans l'offre. Cochez les fiches à créer ou synchroniser dans votre base Contacts.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddManualContactItem}
+                  className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Ajouter un contact</span>
+                </button>
+              </div>
+
+              {editableContacts.length > 0 ? (
+                <div className="space-y-3">
+                  {editableContacts.map((c, idx) => (
+                    <div 
+                      key={idx} 
+                      className={`p-3.5 rounded-xl border transition-all space-y-3 ${
+                        c.isSelected 
+                          ? "bg-black/40 border-white/15" 
+                          : "bg-black/20 border-white/5 opacity-60"
+                      }`}
+                    >
+                      {/* Contact card header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-white/5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleContactSelect(idx)}
+                            className="text-rose-400 hover:text-rose-300 cursor-pointer shrink-0"
+                            title={c.isSelected ? "Désélectionner" : "Sélectionner"}
+                          >
+                            {c.isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-rose-400" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-500" />
+                            )}
+                          </button>
+
+                          <input
+                            type="text"
+                            value={c.fullName}
+                            onChange={(e) => handleUpdateContactField(idx, "fullName", e.target.value)}
+                            placeholder="Nom complet (ex: Claire Dupont)..."
+                            className="bg-black/30 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-semibold focus:outline-none focus:border-rose-400/50 flex-1 min-w-[160px]"
+                          />
+
+                          {c.existingMatch && (
+                            <span className="shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                              <UserCheck className="w-3 h-3 text-emerald-400" />
+                              <span>Contact existant (Sera associé)</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleSetPrimaryContact(idx)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-all cursor-pointer border ${
+                              c.isPrimary
+                                ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                                : "bg-white/5 text-slate-400 border-white/10 hover:text-white"
+                            }`}
+                          >
+                            {c.isPrimary ? "★ Recruteur / Contact Principal" : "Définir comme principal"}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveContactItem(idx)}
+                            className="p-1 text-slate-400 hover:text-rose-400 cursor-pointer"
+                            title="Retirer ce contact"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Contact fields inputs */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] text-slate-400 font-semibold">Poste / Fonction</label>
+                          <input
+                            type="text"
+                            value={c.role || ""}
+                            onChange={(e) => handleUpdateContactField(idx, "role", e.target.value)}
+                            placeholder="ex: Tutrice de stage, DRH..."
+                            className="bg-black/30 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] text-slate-400 font-semibold">Adresse e-mail</label>
+                          <input
+                            type="email"
+                            value={c.email || ""}
+                            onChange={(e) => handleUpdateContactField(idx, "email", e.target.value)}
+                            placeholder="ex: claire.dupont@entreprise.com"
+                            className="bg-black/30 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] text-slate-400 font-semibold">Rôle vis-à-vis du poste</label>
+                          <select
+                            value={c.categoryRole || "Recruteur"}
+                            onChange={(e) => handleUpdateContactField(idx, "categoryRole", e.target.value)}
+                            className="bg-[#0c1020] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
+                          >
+                            <option value="Recruteur">Recruteur / RH</option>
+                            <option value="Tuteur">Tuteur / Tuteur de stage</option>
+                            <option value="HR Manager">Responsable RH</option>
+                            <option value="Manager">Manager Opérationnel</option>
+                            <option value="Contact réseau">Contact Réseau</option>
+                          </select>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] text-slate-400 font-semibold">Téléphone</label>
+                          <input
+                            type="text"
+                            value={c.phone || ""}
+                            onChange={(e) => handleUpdateContactField(idx, "phone", e.target.value)}
+                            placeholder="ex: 01 40 50 60 70"
+                            className="bg-black/30 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="flex flex-col gap-1 md:col-span-2">
+                          <label className="text-[10px] text-slate-400 font-semibold">LinkedIn / Contexte</label>
+                          <input
+                            type="text"
+                            value={c.linkedinUrl || c.notes || ""}
+                            onChange={(e) => {
+                              handleUpdateContactField(idx, "linkedinUrl", e.target.value);
+                              handleUpdateContactField(idx, "notes", e.target.value);
+                            }}
+                            placeholder="URL LinkedIn ou note sur le contact..."
+                            className="bg-black/30 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-xl bg-black/30 border border-white/5 text-center space-y-2">
+                  <p className="text-xs text-slate-400">
+                    Aucune personne physique explicitement nommée n'a été détectée dans le texte source de cette offre.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAddManualContactItem}
+                    className="inline-flex items-center gap-1.5 text-xs text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Ajouter un interlocuteur manuellement</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 7. COLONNE KANBAN DE DESTINATION */}
             <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 flex items-center justify-between">
               <div>
                 <label className="text-xs font-semibold text-slate-300">Colonne Kanban initiale</label>

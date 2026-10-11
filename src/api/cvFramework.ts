@@ -177,22 +177,22 @@ export function convertCandidateProfileToStructuredCV(
   profile: CandidateProfile,
   targetOpp?: Opportunity
 ): StructuredCV {
-  const prenom = profile.fullName ? profile.fullName.split(" ")[0] : "Nathan";
-  const nom = profile.fullName ? profile.fullName.split(" ").slice(1).join(" ") : "PATRAC";
+  const prenom = profile.fullName ? profile.fullName.split(" ")[0] : "Candidat";
+  const nom = profile.fullName ? profile.fullName.split(" ").slice(1).join(" ") : "";
 
   const defaultTitle = targetOpp 
     ? `Candidature ${targetOpp.contractType || "Alternance"} — ${targetOpp.title} | 12-24 mois`
-    : profile.title || `Recherche Contrat d'Apprentissage — Conseiller Banque Privée | 12 à 24 mois dès Septembre 2026`;
+    : profile.title || `Recherche Contrat d'Apprentissage — Banque & Finance`;
 
   const formations: StructuredCVFormation[] = (profile.educations || []).map((edu, idx) => ({
     id: edu.id || `edu_${idx}`,
-    etablissement: edu.school || edu.institution || "Université Clermont Auvergne",
-    ville: profile.city || "Clermont-Ferrand",
-    diplome_intitule_exact: edu.degree || "Licence Économie & Gestion",
-    dateDebut: edu.startDate || "2023",
-    dateFin: edu.endDate || edu.period || "2026",
+    etablissement: edu.school || edu.institution || "Établissement d'enseignement supérieur",
+    ville: profile.city || "France",
+    diplome_intitule_exact: edu.degree || "Diplôme de l'enseignement supérieur",
+    dateDebut: edu.startDate || "",
+    dateFin: edu.endDate || edu.period || "",
     specialisation: (edu as any).field || undefined,
-    coursPertinents: ["Analyse financière", "Droit bancaire", "Microéconomie", "Statistiques & Économétrie"],
+    coursPertinents: ["Analyse financière", "Droit des affaires", "Gestion & Économie"],
     projetsAcademiques: edu.description || undefined
   }));
 
@@ -204,24 +204,23 @@ export function convertCandidateProfileToStructuredCV(
     const bullets = rawBullets.length > 0 
       ? rawBullets.map(b => b.replace(/^[-•*]\s*/, "").trim())
       : [
-          `Gestion et développement de la relation clientèle chez ${exp.company || "l'établissement"}`,
-          `Instruction et conformité des dossiers de financement et d'assurance`
+          `Gestion des missions confiées chez ${exp.company || "l'entreprise"}`,
+          `Suivi et exécution des tâches opérationnelles`
         ];
 
     const competences = Array.from(new Set([
       ...(exp.skills || []),
       ...(exp.tools || []),
-      "Relation client",
-      "Rigueur réglementaire"
+      "Rigueur opérationnelle"
     ])).slice(0, 4);
 
     return {
       id: exp.id || `exp_${idx}`,
       type: "professionnelle",
-      poste: exp.role || "Conseiller Clientèle",
-      entreprise: exp.company || "Crédit Agricole",
-      ville: profile.city || "Clermont-Ferrand",
-      dateDebut: exp.startDate || "2024",
+      poste: exp.role || "Poste occupé",
+      entreprise: exp.company || "Entreprise",
+      ville: profile.city || "France",
+      dateDebut: exp.startDate || "",
       dateFin: exp.endDate || "Présent",
       missions: bullets,
       resultats: [],
@@ -236,14 +235,14 @@ export function convertCandidateProfileToStructuredCV(
       langue: l.language,
       niveauAdjectif: isEnglish ? "Avancé" : "Intermédiaire",
       niveauCECRL: isEnglish ? "B2" : "B1",
-      certification: isEnglish ? "TOEIC 850 (2025)" : undefined
+      certification: undefined
     };
   });
 
   if (langues.length === 0) {
     langues.push(
       { langue: "Français", niveauAdjectif: "Langue Maternelle", niveauCECRL: "Natif" },
-      { langue: "Anglais", niveauAdjectif: "Avancé", niveauCECRL: "B2", certification: "TOEIC 850 (2025)" }
+      { langue: "Anglais", niveauAdjectif: "Courant", niveauCECRL: "B2" }
     );
   }
 

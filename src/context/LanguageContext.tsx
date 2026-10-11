@@ -375,7 +375,7 @@ const translationsData: Record<Language, Translations> = {
     nav: {
       home: "Accueil",
       opportunities: "Opportunités",
-      messages: "Messages",
+      messages: "Networking",
       prospecting: "Prospection",
       calendar: "Calendrier",
       documents: "Documents",
@@ -715,7 +715,7 @@ const translationsData: Record<Language, Translations> = {
     nav: {
       home: "Home",
       opportunities: "Opportunities",
-      messages: "Messages",
+      messages: "Networking",
       prospecting: "Prospecting",
       calendar: "Calendar",
       documents: "Documents",

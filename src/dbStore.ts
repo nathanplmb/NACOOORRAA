@@ -14,17 +14,19 @@ import {
   AiUsageRecord,
   AiUsageSettings
 } from "./types";
+import { DailyBriefData } from "./api/gemini";
 import { db, auth } from "./firebase";
 import { 
   doc, 
   setDoc, 
   getDoc,
-  disableNetwork
+  disableNetwork,
+  onSnapshot
 } from "firebase/firestore";
 import { isHumanResourcesRole, isBankingAndFinanceRole } from "./utils/contactMerger";
 import { classifyContactFunction } from "./utils/contactTaxonomy";
 import { resolveCompany, isSameCompany } from "./utils/companyResolver";
-import { isSponsoredOrAdvertisingName, mergeContactData, normalizePersonName } from "./utils/contactResolver";
+import { isSponsoredOrAdvertisingName, mergeContactData, normalizePersonName, resolveContact, cleanPersonDisplayName } from "./utils/contactResolver";
 import { SEED_CONTACTS } from "./data/initialContacts";
 import { generateInitialAiUsageRecords } from "./data/initialAiUsage";
 
@@ -178,22 +180,9 @@ function cleanForFirestore<T>(input: T): T {
 }
 
 const INITIAL_PROFILE = createDefaultProfile();
-const INITIAL_COMPANIES: Company[] = [
-  {
-    id: "comp_ca_cf",
-    name: "Crédit Agricole Centre France",
-    sector: "Banque & Finance",
-    location: "Clermont-Ferrand",
-    description: "Banque coopérative et mutualiste régionale leader sur l'Auvergne.",
-    notes: "",
-    createdAt: "2026-09-20T09:00:00.000Z",
-    opportunityCount: 0,
-    contactCount: 1,
-    noteCount: 0
-  }
-];
+const INITIAL_COMPANIES: Company[] = [];
 const INITIAL_OPPORTUNITIES: Opportunity[] = [];
-const INITIAL_CONTACTS: Contact[] = [...SEED_CONTACTS];
+const INITIAL_CONTACTS: Contact[] = [];
 const INITIAL_CALENDAR: CalendarEvent[] = [];
 
 const INITIAL_SESSIONS: ChatSession[] = [
@@ -316,8 +305,12 @@ class DBStore {
   private aiUsageRecords: AiUsageRecord[] = generateInitialAiUsageRecords();
   private aiUsageSettings: AiUsageSettings = INITIAL_AI_USAGE_SETTINGS;
 
+  // Daily Brief IA personnalisé par utilisateur
+  private dailyBrief: DailyBriefData | null = null;
+
   private currentUserId: string | null = null;
   private isInitializingUserId: string | null = null;
+  private sessionSequenceId: number = 0;
   private syncTimeout: any = null;
   private listeners: Set<() => void> = new Set();
   private isQuotaExceeded: boolean = false;
@@ -330,55 +323,79 @@ class DBStore {
   private lastCloudError: string | null = null;
 
   private checkQuotaExceeded(): boolean {
-    if (this.isQuotaExceeded) return true;
-    try {
-      if (typeof window !== "undefined") {
-        const storedTimestamp = localStorage.getItem("nacora_quota_exceeded_timestamp");
-        if (storedTimestamp) {
-          const timestamp = parseInt(storedTimestamp, 10);
-          // Quotas reset daily (24 hours). If recorded in the last 24 hours, treat as exceeded.
-          if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
-            this.isQuotaExceeded = true;
-            this.cloudStatus = "quota_exceeded";
-            this.lastCloudError = "Quota journalier Firestore atteint. Sauvegarde locale active.";
-            return true;
-          } else {
-            localStorage.removeItem("nacora_quota_exceeded_timestamp");
-          }
-        }
-      }
-    } catch (_) {}
-    return false;
+    return this.isQuotaExceeded;
   }
 
   private markQuotaExceeded(reason?: string) {
     this.isQuotaExceeded = true;
     this.cloudStatus = "quota_exceeded";
-    this.lastCloudError = reason || "Quota journalier Firestore atteint. Sauvegarde locale active.";
+    this.lastCloudError = reason || "Limite de quota Firestore atteinte. Mode local actif.";
     this.lastSyncSuccess = false;
-    this.syncBackoffUntil = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+    this.syncBackoffUntil = Date.now() + 15 * 60 * 1000; // 15 min retry backoff
     if (this.syncTimeout) {
       clearTimeout(this.syncTimeout);
       this.syncTimeout = null;
     }
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.setItem("nacora_quota_exceeded_timestamp", String(Date.now()));
-      }
-    } catch (_) {}
-    try {
-      disableNetwork(db).catch(() => {});
-    } catch (_) {}
     this.notifyListenersOnly();
   }
 
-  constructor() {
-    if (this.checkQuotaExceeded()) {
-      try {
-        disableNetwork(db).catch(() => {});
-      } catch (_) {}
+  public retryCloudConnection() {
+    this.isQuotaExceeded = false;
+    this.syncBackoffUntil = 0;
+    if (this.currentUserId) {
+      this.initializeForUser(this.currentUserId, this.profile.email, this.profile.fullName);
     }
-    this.loadFromLocalStorage();
+  }
+
+  private createLocalBackup(userId: string) {
+    if (typeof window === "undefined" || !userId) return;
+    try {
+      const backupData = {
+        timestamp: new Date().toISOString(),
+        profile: this.profile,
+        opportunities: this.opportunities,
+        contacts: this.contacts,
+        companies: this.companies,
+        calendarEvents: this.calendarEvents,
+        documents: this.documents
+      };
+      localStorage.setItem(`nacora_backup_${userId}`, JSON.stringify(backupData));
+    } catch (_) {}
+  }
+
+  private mergeEntitiesById<T extends { id: string; updatedAt?: string }>(cloudItems: T[] = [], localItems: T[] = []): T[] {
+    const itemMap = new Map<string, T>();
+
+    cloudItems.forEach(item => {
+      if (item && item.id) {
+        itemMap.set(item.id, item);
+      }
+    });
+
+    localItems.forEach(localItem => {
+      if (localItem && localItem.id) {
+        if (!itemMap.has(localItem.id)) {
+          itemMap.set(localItem.id, localItem);
+        } else {
+          const cloudItem = itemMap.get(localItem.id)!;
+          const cloudTs = cloudItem.updatedAt ? new Date(cloudItem.updatedAt).getTime() : 0;
+          const localTs = localItem.updatedAt ? new Date(localItem.updatedAt).getTime() : 0;
+          if (localTs > cloudTs) {
+            itemMap.set(localItem.id, localItem);
+          }
+        }
+      }
+    });
+
+    return Array.from(itemMap.values());
+  }
+
+  constructor() {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("nacora_quota_exceeded_timestamp");
+      }
+    } catch (_) {}
   }
 
   // Subscribe to changes
@@ -418,155 +435,19 @@ class DBStore {
           this.syncToFirestore(this.currentUserId);
         }
       }, 1500);
-    } else {
-      this.saveToLocalStorage();
     }
   }
 
   // Initialize for authenticated user (Dual-layer persistence: localStorage + Cloud Firestore)
   async initializeForUser(userId: string, email?: string | null, displayName?: string | null) {
-    this.currentUserId = userId;
-    
-    // 1. Load IMMEDIATELY from user local storage for 0ms offline-first responsiveness
-    this.loadFromUserLocalStorage(userId);
-    if (!this.profile.email && email) {
-      this.profile.email = email;
-    }
-    if ((!this.profile.firstName || !this.profile.fullName) && displayName) {
-      this.profile.fullName = displayName;
-      this.profile.firstName = displayName.split(" ")[0];
-      this.profile.lastName = displayName.split(" ").slice(1).join(" ");
-    }
-
-    // Immediately notify React components to render local data without waiting for network
-    this.notifyListenersOnly();
-
-    // Check if Firestore quota is already exceeded for today
-    if (this.checkQuotaExceeded()) {
-      this.recalculateCompanyCounters();
-      this.saveToUserLocalStorage(userId);
-      this.cloudStatus = "quota_exceeded";
-      this.lastCloudError = "Quota journalier Firestore atteint. Sauvegarde locale active.";
-      this.notifyListenersOnly();
-      return;
-    }
-
-    // Prevent concurrent duplicate initialization
-    if (this.isInitializingUserId === userId) {
-      return;
-    }
+    const currentSeq = ++this.sessionSequenceId;
     this.isInitializingUserId = userId;
+    this.currentUserId = userId;
 
-    const cleanEmail = (email || this.profile.email || "").trim().toLowerCase().replace(/[^a-zA-Z0-9_]/g, "_");
-
-    // 2. Background sync with Cloud Firestore with 2.5s maximum timeout
-    try {
-      const userRef = doc(db, "users", userId);
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error("FIRESTORE_TIMEOUT")), 2500)
-      );
-
-      let snapshot = await Promise.race([
-        getDoc(userRef),
-        timeoutPromise
-      ]);
-
-      // If document by UID not found, check fallback by email document
-      if (!snapshot.exists() && cleanEmail) {
-        try {
-          const emailRef = doc(db, "users_by_email", cleanEmail);
-          const emailSnap = await Promise.race([
-            getDoc(emailRef),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error("FIRESTORE_TIMEOUT")), 1500))
-          ]);
-          if (emailSnap.exists()) {
-            snapshot = emailSnap;
-          }
-        } catch (_) {}
-      }
-
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        if (data.profile && typeof data.profile === "object" && Object.keys(data.profile).length > 0) {
-          this.profile = { ...this.profile, ...data.profile };
-          const { score } = calculateProfileCompletion(this.profile);
-          this.profile.profileCompletionScore = score;
-        }
-        if (Array.isArray(data.opportunities) && data.opportunities.length > 0) {
-          this.opportunities = data.opportunities;
-        }
-        if (Array.isArray(data.contacts) && data.contacts.length > 0) {
-          this.contacts = this.purgeSponsoredContacts(data.contacts);
-        }
-        this.reconcileContactCategories();
-        if (Array.isArray(data.companies) && data.companies.length > 0) {
-          this.companies = data.companies;
-        }
-        if (Array.isArray(data.calendarEvents) && data.calendarEvents.length > 0) {
-          this.calendarEvents = data.calendarEvents;
-        }
-        if (Array.isArray(data.documents) && data.documents.length > 0) {
-          this.documents = data.documents;
-        }
-        if (Array.isArray(data.chatSessions) && data.chatSessions.length > 0) {
-          this.chatSessions = data.chatSessions;
-        }
-        if (Array.isArray(data.prospectLeads)) {
-          this.prospectLeads = data.prospectLeads;
-        }
-        if (Array.isArray(data.prospectLists) && data.prospectLists.length > 0) {
-          this.prospectLists = data.prospectLists;
-        }
-        if (Array.isArray(data.savedSearches) && data.savedSearches.length > 0) {
-          this.savedSearches = data.savedSearches;
-        }
-        if (Array.isArray(data.prospectActivities) && data.prospectActivities.length > 0) {
-          this.prospectActivities = data.prospectActivities;
-        }
-        if (data.prospectingSettings && typeof data.prospectingSettings === "object") {
-          this.prospectingSettings = { ...this.prospectingSettings, ...data.prospectingSettings };
-        }
-
-        this.cloudStatus = "connected";
-        this.lastCloudSyncTime = new Date().toISOString();
-        this.lastCloudError = null;
-        this.lastSyncSuccess = true;
-      } else {
-        this.cloudStatus = "connected";
-        this.lastCloudSyncTime = new Date().toISOString();
-      }
-
-      this.recalculateCompanyCounters();
-      this.saveToUserLocalStorage(userId);
-      this.notifyListenersOnly();
-    } catch (e: any) {
-      const errMsg = e?.message || String(e);
-      if (errMsg.includes("resource-exhausted") || errMsg.includes("Quota limit exceeded") || errMsg.includes("quota") || errMsg.includes("overloading the backend")) {
-        this.markQuotaExceeded("Quota journalier Firestore atteint. Sauvegarde locale active.");
-      } else if (errMsg.includes("FIRESTORE_TIMEOUT") || errMsg.includes("timeout") || errMsg.includes("Timeout")) {
-        this.cloudStatus = "offline";
-        this.lastCloudError = "Synchronisation cloud indisponible — Mode local";
-      } else if (errMsg.includes("not found") || errMsg.includes("not-found") || errMsg.includes("Database")) {
-        this.cloudStatus = "offline";
-        this.lastCloudError = "Base de données cloud en attente de provisionnement. Mode local actif.";
-      } else {
-        this.cloudStatus = "offline";
-        this.lastCloudError = "Synchronisation cloud indisponible — Mode local";
-        console.warn("Cloud sync offline mode, using local session data:", e);
-      }
-      this.lastSyncSuccess = false;
-      this.loadFromUserLocalStorage(userId);
-      this.notifyListenersOnly();
-    } finally {
-      this.isInitializingUserId = null;
-    }
-  }
-
-  clearUser() {
-    this.currentUserId = null;
-    this.profile = createDefaultProfile();
+    // Reset all internal state synchronously
+    this.profile = createDefaultProfile(userId, email || "", displayName || "");
     this.opportunities = [];
-    this.contacts = [...SEED_CONTACTS];
+    this.contacts = [];
     this.companies = [];
     this.calendarEvents = [];
     this.documents = [];
@@ -578,99 +459,176 @@ class DBStore {
     this.prospectingSettings = INITIAL_PROSPECTING_SETTINGS;
     this.aiUsageRecords = generateInitialAiUsageRecords();
     this.aiUsageSettings = INITIAL_AI_USAGE_SETTINGS;
+    this.dailyBrief = null;
+
+    // 1. Load IMMEDIATELY from local storage
+    this.loadFromUserLocalStorage(userId);
     this.notifyListenersOnly();
-  }
 
-  // LocalStorage Fallback
-  private loadFromLocalStorage() {
-    if (typeof window === "undefined" || typeof localStorage === "undefined") return;
+    // 2. Setup reactive sync and fetch
     try {
-      const p = localStorage.getItem("nacora_profile");
-      if (p) this.profile = JSON.parse(p);
-      else this.profile = INITIAL_PROFILE;
-
-      const c = localStorage.getItem("nacora_contacts");
-      if (c) {
-        try {
-          const parsed = JSON.parse(c);
-          this.contacts = Array.isArray(parsed) && parsed.length > 0 ? this.purgeSponsoredContacts(parsed) : [...SEED_CONTACTS];
-        } catch {
-          this.contacts = [...SEED_CONTACTS];
+      const userRef = doc(db, "users", userId);
+      
+      onSnapshot(userRef, (snapshot) => {
+        if (snapshot.exists()) {
+            this.updateStateFromCloud(snapshot.data());
+            this.notifyListenersOnly();
         }
+      });
+
+      const snapshot = await getDoc(userRef);
+
+      if (currentSeq !== this.sessionSequenceId) return;
+
+      if (snapshot.exists()) {
+        this.updateStateFromCloud(snapshot.data());
+        this.lastSyncSuccess = true;
+        this.cloudStatus = "connected";
       } else {
-        this.contacts = [...SEED_CONTACTS];
+        this.cloudStatus = "connected";
       }
-    } catch (e) {
-      console.error("Error loading local storage:", e);
+
+      this.recalculateCompanyCounters();
+      this.saveToUserLocalStorage(userId);
+      this.notifyListenersOnly();
+    } catch (e: any) {
+      console.error("Firestore initializeForUser error:", e);
+      this.cloudStatus = "offline";
+      this.lastSyncSuccess = false;
+      this.notifyListenersOnly();
+    } finally {
+      if (currentSeq === this.sessionSequenceId) {
+        this.isInitializingUserId = null;
+      }
     }
   }
 
-  private saveToLocalStorage() {
-    if (typeof window === "undefined" || typeof localStorage === "undefined") return;
-    try {
-      localStorage.setItem("nacora_profile", JSON.stringify(this.profile));
-    } catch (e) {
-      console.error("Error writing local storage:", e);
+  private updateStateFromCloud(data: any) {
+    if (data.profile && typeof data.profile === "object" && Object.keys(data.profile).length > 0) {
+      this.profile = { ...this.profile, ...data.profile };
+      const { score } = calculateProfileCompletion(this.profile);
+      this.profile.profileCompletionScore = score;
     }
+    if (Array.isArray(data.opportunities)) {
+      this.opportunities = this.mergeEntitiesById(data.opportunities, this.opportunities);
+    }
+    if (Array.isArray(data.contacts)) {
+      this.contacts = this.purgeSponsoredContacts(this.mergeEntitiesById(data.contacts, this.contacts));
+    }
+    this.reconcileContactCategories();
+    this.reconcileOpportunityContacts();
+    if (Array.isArray(data.companies)) {
+      this.companies = this.mergeEntitiesById(data.companies, this.companies);
+    }
+    if (Array.isArray(data.calendarEvents)) {
+      this.calendarEvents = this.mergeEntitiesById(data.calendarEvents, this.calendarEvents);
+    }
+    if (Array.isArray(data.documents)) {
+      this.documents = this.mergeEntitiesById(data.documents, this.documents);
+    }
+    if (Array.isArray(data.chatSessions) && data.chatSessions.length > 0) {
+      this.chatSessions = data.chatSessions;
+    }
+    if (Array.isArray(data.prospectLeads)) {
+      this.prospectLeads = data.prospectLeads;
+    }
+    if (Array.isArray(data.prospectLists) && data.prospectLists.length > 0) {
+      this.prospectLists = data.prospectLists;
+    }
+    if (Array.isArray(data.savedSearches) && data.savedSearches.length > 0) {
+      this.savedSearches = data.savedSearches;
+    }
+    if (Array.isArray(data.prospectActivities) && data.prospectActivities.length > 0) {
+      this.prospectActivities = data.prospectActivities;
+    }
+    if (data.prospectingSettings && typeof data.prospectingSettings === "object") {
+      this.prospectingSettings = { ...this.prospectingSettings, ...data.prospectingSettings };
+    }
+    if (data.dailyBrief && typeof data.dailyBrief === "object") {
+      this.dailyBrief = data.dailyBrief;
+    }
+  }
+
+  clearUser() {
+    this.sessionSequenceId++;
+    if (this.syncTimeout) {
+      clearTimeout(this.syncTimeout);
+      this.syncTimeout = null;
+    }
+    this.isSyncing = false;
+    this.needsAnotherSync = false;
+    this.isInitializingUserId = null;
+    this.currentUserId = null;
+    this.profile = createDefaultProfile();
+    this.opportunities = [];
+    this.contacts = [];
+    this.companies = [];
+    this.calendarEvents = [];
+    this.documents = [];
+    this.chatSessions = INITIAL_SESSIONS;
+    this.prospectLeads = [];
+    this.prospectLists = INITIAL_PROSPECT_LISTS;
+    this.savedSearches = INITIAL_SAVED_SEARCHES;
+    this.prospectActivities = INITIAL_PROSPECT_ACTIVITIES;
+    this.prospectingSettings = INITIAL_PROSPECTING_SETTINGS;
+    this.aiUsageRecords = generateInitialAiUsageRecords();
+    this.aiUsageSettings = INITIAL_AI_USAGE_SETTINGS;
+    this.dailyBrief = null;
+    this.cloudStatus = "offline";
+    this.lastCloudError = null;
+    this.lastCloudSyncTime = null;
+    this.notifyListenersOnly();
   }
 
   private loadFromUserLocalStorage(userId: string) {
     if (typeof window === "undefined" || typeof localStorage === "undefined") return;
     try {
-      let p = localStorage.getItem(`nacora:user:${userId}:profile`) || localStorage.getItem(`nacora_${userId}_profile`);
-      let o = localStorage.getItem(`nacora_${userId}_opportunities`);
-      let c = localStorage.getItem(`nacora_${userId}_contacts`);
-      let co = localStorage.getItem(`nacora_${userId}_companies`);
-      let cal = localStorage.getItem(`nacora_${userId}_calendar`);
-      let docu = localStorage.getItem(`nacora_${userId}_documents`);
-      let sess = localStorage.getItem(`nacora_${userId}_sessions`);
-      let leads = localStorage.getItem(`nacora_${userId}_prospect_leads`);
-      let lists = localStorage.getItem(`nacora_${userId}_prospect_lists`);
-      let searches = localStorage.getItem(`nacora_${userId}_prospect_searches`);
-      let activities = localStorage.getItem(`nacora_${userId}_prospect_activities`);
-      let psettings = localStorage.getItem(`nacora_${userId}_prospect_settings`);
-      let aiRecords = localStorage.getItem(`nacora_${userId}_ai_usage_records`);
-      let aiSettings = localStorage.getItem(`nacora_${userId}_ai_usage_settings`);
+      // Strictly load keys belonging to this exact userId - NEVER scan other keys or legacy global keys
+      const p = localStorage.getItem(`nacora:v2:user:${userId}:profile`) || 
+                localStorage.getItem(`nacora:user:${userId}:profile`) || 
+                localStorage.getItem(`nacora_${userId}_profile`);
+      const o = localStorage.getItem(`nacora:v2:user:${userId}:opportunities`) || 
+                localStorage.getItem(`nacora_${userId}_opportunities`);
+      const c = localStorage.getItem(`nacora:v2:user:${userId}:contacts`) || 
+                localStorage.getItem(`nacora_${userId}_contacts`);
+      const co = localStorage.getItem(`nacora:v2:user:${userId}:companies`) || 
+                localStorage.getItem(`nacora_${userId}_companies`);
+      const cal = localStorage.getItem(`nacora:v2:user:${userId}:calendar`) || 
+                  localStorage.getItem(`nacora_${userId}_calendar`);
+      const docu = localStorage.getItem(`nacora:v2:user:${userId}:documents`) || 
+                   localStorage.getItem(`nacora_${userId}_documents`);
+      const sess = localStorage.getItem(`nacora:v2:user:${userId}:sessions`) || 
+                   localStorage.getItem(`nacora_${userId}_sessions`);
+      const leads = localStorage.getItem(`nacora:v2:user:${userId}:prospect_leads`) || 
+                    localStorage.getItem(`nacora_${userId}_prospect_leads`);
+      const lists = localStorage.getItem(`nacora:v2:user:${userId}:prospect_lists`) || 
+                    localStorage.getItem(`nacora_${userId}_prospect_lists`);
+      const searches = localStorage.getItem(`nacora:v2:user:${userId}:prospect_searches`) || 
+                       localStorage.getItem(`nacora_${userId}_prospect_searches`);
+      const activities = localStorage.getItem(`nacora:v2:user:${userId}:prospect_activities`) || 
+                          localStorage.getItem(`nacora_${userId}_prospect_activities`);
+      const psettings = localStorage.getItem(`nacora:v2:user:${userId}:prospect_settings`) || 
+                         localStorage.getItem(`nacora_${userId}_prospect_settings`);
+      const aiRecords = localStorage.getItem(`nacora:v2:user:${userId}:ai_usage_records`) || 
+                        localStorage.getItem(`nacora_${userId}_ai_usage_records`);
+      const aiSettings = localStorage.getItem(`nacora:v2:user:${userId}:ai_usage_settings`) || 
+                         localStorage.getItem(`nacora_${userId}_ai_usage_settings`);
+      const b = localStorage.getItem(`nacora:v2:user:${userId}:daily_brief`) || 
+                localStorage.getItem(`nacora_${userId}_daily_brief`);
 
-      // If this is a fresh user session without data, scan for previous data in localStorage
-      let hasDirectData = false;
+      // Erase any legacy global brief that wasn't scoped by userId
       try {
-        if (o && JSON.parse(o).length > 0) hasDirectData = true;
-        if (c && JSON.parse(c).length > 0) hasDirectData = true;
+        localStorage.removeItem("nacora_daily_brief");
       } catch (_) {}
 
-      if (!hasDirectData && typeof window !== "undefined") {
-        // Look for any existing stored items in localStorage from guest or previous user sessions
-        const keys = Object.keys(localStorage);
-        for (const key of keys) {
-          if (key !== `nacora_${userId}_opportunities` && key.startsWith("nacora_") && key.endsWith("_opportunities")) {
-            const rawOpps = localStorage.getItem(key);
-            if (rawOpps) {
-              try {
-                const parsed = JSON.parse(rawOpps);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                  const prefix = key.replace("_opportunities", "");
-                  if (!o || JSON.parse(o).length === 0) o = rawOpps;
-                  if (!c || JSON.parse(c).length === 0) c = localStorage.getItem(`${prefix}_contacts`) || c;
-                  if (!co || JSON.parse(co).length === 0) co = localStorage.getItem(`${prefix}_companies`) || co;
-                  if (!cal || JSON.parse(cal).length === 0) cal = localStorage.getItem(`${prefix}_calendar`) || cal;
-                  if (!docu || JSON.parse(docu).length === 0) docu = localStorage.getItem(`${prefix}_documents`) || docu;
-                  if (!p) p = localStorage.getItem(`${prefix}_profile`) || p;
-                  if (!sess) sess = localStorage.getItem(`${prefix}_sessions`) || sess;
-                  break;
-                }
-              } catch (_) {}
-            }
-          }
+      if (b) {
+        try {
+          this.dailyBrief = JSON.parse(b);
+        } catch {
+          this.dailyBrief = null;
         }
-        
-        // Also check legacy keys without user prefix
-        if (!o) o = localStorage.getItem("nacora_opportunities");
-        if (!c) c = localStorage.getItem("nacora_contacts");
-        if (!co) co = localStorage.getItem("nacora_companies");
-        if (!cal) cal = localStorage.getItem("nacora_calendar");
-        if (!docu) docu = localStorage.getItem("nacora_documents");
-        if (!p) p = localStorage.getItem("nacora_profile");
+      } else {
+        this.dailyBrief = null;
       }
 
       if (p) {
@@ -693,16 +651,17 @@ class DBStore {
       if (c) {
         try { 
           const parsed = JSON.parse(c);
-          this.contacts = Array.isArray(parsed) && parsed.length > 0 ? this.purgeSponsoredContacts(parsed) : [...SEED_CONTACTS];
+          this.contacts = Array.isArray(parsed) ? this.purgeSponsoredContacts(parsed) : [];
         } catch { 
-          this.contacts = [...SEED_CONTACTS]; 
+          this.contacts = []; 
         }
       } else {
-        this.contacts = [...SEED_CONTACTS];
+        this.contacts = [];
       }
 
-      // Reconcile categories
+      // Reconcile categories & opportunity contacts
       this.reconcileContactCategories();
+      this.reconcileOpportunityContacts();
 
       if (co) {
         try { this.companies = JSON.parse(co); } catch { this.companies = []; }
@@ -785,6 +744,30 @@ class DBStore {
   private saveToUserLocalStorage(userId: string) {
     if (typeof window === "undefined" || typeof localStorage === "undefined") return;
     try {
+      // Standard canonical keys prefixed with user UID
+      localStorage.setItem(`nacora:v2:user:${userId}:profile`, JSON.stringify(this.profile));
+      localStorage.setItem(`nacora:v2:user:${userId}:opportunities`, JSON.stringify(this.opportunities));
+      localStorage.setItem(`nacora:v2:user:${userId}:contacts`, JSON.stringify(this.contacts));
+      localStorage.setItem(`nacora:v2:user:${userId}:companies`, JSON.stringify(this.companies));
+      localStorage.setItem(`nacora:v2:user:${userId}:calendar`, JSON.stringify(this.calendarEvents));
+      localStorage.setItem(`nacora:v2:user:${userId}:documents`, JSON.stringify(this.documents));
+      localStorage.setItem(`nacora:v2:user:${userId}:sessions`, JSON.stringify(this.chatSessions));
+      localStorage.setItem(`nacora:v2:user:${userId}:prospect_leads`, JSON.stringify(this.prospectLeads));
+      localStorage.setItem(`nacora:v2:user:${userId}:prospect_lists`, JSON.stringify(this.prospectLists));
+      localStorage.setItem(`nacora:v2:user:${userId}:prospect_searches`, JSON.stringify(this.savedSearches));
+      localStorage.setItem(`nacora:v2:user:${userId}:prospect_activities`, JSON.stringify(this.prospectActivities));
+      localStorage.setItem(`nacora:v2:user:${userId}:prospect_settings`, JSON.stringify(this.prospectingSettings));
+      localStorage.setItem(`nacora:v2:user:${userId}:ai_usage_records`, JSON.stringify(this.aiUsageRecords));
+      localStorage.setItem(`nacora:v2:user:${userId}:ai_usage_settings`, JSON.stringify(this.aiUsageSettings));
+      if (this.dailyBrief) {
+        localStorage.setItem(`nacora:v2:user:${userId}:daily_brief`, JSON.stringify(this.dailyBrief));
+        localStorage.setItem(`nacora_${userId}_daily_brief`, JSON.stringify(this.dailyBrief));
+      } else {
+        localStorage.removeItem(`nacora:v2:user:${userId}:daily_brief`);
+        localStorage.removeItem(`nacora_${userId}_daily_brief`);
+      }
+
+      // Backward compatibility keys (strictly scoped to this userId)
       localStorage.setItem(`nacora:user:${userId}:profile`, JSON.stringify(this.profile));
       localStorage.setItem(`nacora_${userId}_profile`, JSON.stringify(this.profile));
       localStorage.setItem(`nacora_${userId}_opportunities`, JSON.stringify(this.opportunities));
@@ -807,6 +790,7 @@ class DBStore {
 
   // Firebase Cloud Sync with single-flight concurrency and exponential backoff protection
   async syncToFirestore(userId: string) {
+    if (this.currentUserId !== userId) return;
     if (this.checkQuotaExceeded() || Date.now() < this.syncBackoffUntil) return;
     
     // If a sync is already running, mark that another sync is needed when it finishes
@@ -816,6 +800,8 @@ class DBStore {
     }
 
     this.isSyncing = true;
+    const currentSeq = this.sessionSequenceId;
+
     try {
       const userRef = doc(db, "users", userId);
       const rawPayload = {
@@ -833,11 +819,16 @@ class DBStore {
         savedSearches: this.savedSearches,
         prospectActivities: this.prospectActivities,
         prospectingSettings: this.prospectingSettings,
+        dailyBrief: this.dailyBrief || null,
         updatedAt: new Date().toISOString()
       };
       const cleanPayload = cleanForFirestore(JSON.parse(JSON.stringify(rawPayload)));
       
       await setDoc(userRef, cleanPayload, { merge: true });
+
+      if (currentSeq !== this.sessionSequenceId || this.currentUserId !== userId) {
+        return;
+      }
 
       this.lastSyncSuccess = true;
       this.cloudStatus = "connected";
@@ -846,8 +837,16 @@ class DBStore {
     } catch (e: any) {
       const errMsg = e?.message || String(e);
       const errCode = e?.code || "";
-      if (errCode === "resource-exhausted" || errMsg.includes("resource-exhausted") || errMsg.includes("maximum allowed queued writes") || errMsg.includes("overloading the backend") || errMsg.includes("Quota limit exceeded") || errMsg.includes("quota")) {
+      if (errCode === "resource-exhausted" || errMsg.includes("resource-exhausted")) {
         this.markQuotaExceeded("Quota journalier Firestore atteint. Sauvegarde locale active.");
+      } else if (errCode === "permission-denied" || errMsg.includes("permission-denied")) {
+        this.lastSyncSuccess = false;
+        this.cloudStatus = "error";
+        this.lastCloudError = "Erreur de permissions d'accès Firestore";
+      } else if (errCode === "unauthenticated" || errMsg.includes("unauthenticated")) {
+        this.lastSyncSuccess = false;
+        this.cloudStatus = "error";
+        this.lastCloudError = "Session expirée — Veuillez vous reconnecter";
       } else if (errMsg.includes("not found") || errMsg.includes("not-found") || errMsg.includes("Database")) {
         this.lastSyncSuccess = false;
         this.cloudStatus = "offline";
@@ -856,7 +855,7 @@ class DBStore {
         this.lastSyncSuccess = false;
         this.cloudStatus = "offline";
         this.syncBackoffUntil = Date.now() + 10000; // 10s backoff for transient network issues
-        this.lastCloudError = "Synchronisation cloud indisponible — Mode local";
+        this.lastCloudError = "Connexion cloud temporairement indisponible — Mode local actif";
       }
     } finally {
       this.isSyncing = false;
@@ -894,16 +893,29 @@ class DBStore {
     this.profile = { ...this.profile, ...p };
     const { score } = calculateProfileCompletion(this.profile);
     this.profile.profileCompletionScore = score;
-    this.saveToLocalStorage();
     if (this.currentUserId) {
       this.saveToUserLocalStorage(this.currentUserId);
-      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
-        try {
-          localStorage.setItem(`nacora:user:${this.currentUserId}:profile`, JSON.stringify(this.profile));
-        } catch (_) {}
-      }
     }
     this.notify();
+  }
+
+  // Daily Brief Operations
+  getDailyBrief(): DailyBriefData | null {
+    return this.dailyBrief;
+  }
+
+  setDailyBrief(brief: DailyBriefData | null) {
+    this.dailyBrief = brief;
+    if (this.currentUserId) {
+      this.saveToUserLocalStorage(this.currentUserId);
+      if (this.syncTimeout) clearTimeout(this.syncTimeout);
+      this.syncTimeout = setTimeout(() => {
+        if (this.currentUserId && !this.checkQuotaExceeded()) {
+          this.syncToFirestore(this.currentUserId);
+        }
+      }, 1500);
+    }
+    this.notifyListenersOnly();
   }
 
   async saveUserProfile(profileData: Partial<CandidateProfile>): Promise<CandidateProfile> {
@@ -911,14 +923,8 @@ class DBStore {
     const { score } = calculateProfileCompletion(this.profile);
     this.profile.profileCompletionScore = score;
 
-    this.saveToLocalStorage();
     if (this.currentUserId) {
       this.saveToUserLocalStorage(this.currentUserId);
-      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
-        try {
-          localStorage.setItem(`nacora:user:${this.currentUserId}:profile`, JSON.stringify(this.profile));
-        } catch (_) {}
-      }
     }
 
     this.notifyListenersOnly();
@@ -954,9 +960,293 @@ class DBStore {
     return this.opportunities;
   }
 
+  reconcileOpportunityContacts() {
+    if (!Array.isArray(this.opportunities) || this.opportunities.length === 0) return;
+    if (!Array.isArray(this.contacts)) return;
+
+    let changed = false;
+
+    this.opportunities = this.opportunities.map(opp => {
+      const contactIdSet = new Set<string>(opp.contactIds || []);
+
+      // 1. Check recruiterContact
+      if (opp.recruiterContact) {
+        const recId = opp.recruiterContact.contactId || opp.recruiterContact.id;
+        if (recId) {
+          contactIdSet.add(recId);
+        } else {
+          const rawName = (opp.recruiterContact.name || "").trim();
+          const rawEmail = (opp.recruiterContact.email || "").trim().toLowerCase();
+          const rawLinkedin = (opp.recruiterContact.linkedinUrl || opp.recruiterContact.linkedin || "").trim();
+          if (rawName || rawEmail || rawLinkedin) {
+            const res = resolveContact({
+              fullName: rawName,
+              email: rawEmail,
+              linkedInUrl: rawLinkedin,
+              companyName: opp.companyName
+            }, this.contacts);
+            if (res.matchedContact && (res.decision === "certain" || res.decision === "probable")) {
+              contactIdSet.add(res.matchedContact.id);
+              opp.recruiterContact.contactId = res.matchedContact.id;
+              opp.recruiterContact.id = res.matchedContact.id;
+              changed = true;
+            }
+          }
+        }
+      }
+
+      // 2. Check contacts in this.contacts matching opp.id
+      this.contacts.forEach(c => {
+        if (c.opportunityId === opp.id || (c.opportunityIds && c.opportunityIds.includes(opp.id))) {
+          contactIdSet.add(c.id);
+        }
+      });
+
+      const finalContactIds = Array.from(contactIdSet);
+      if (JSON.stringify(finalContactIds.sort()) !== JSON.stringify((opp.contactIds || []).sort())) {
+        changed = true;
+        opp.contactIds = finalContactIds;
+      }
+
+      // 3. Ensure contacts are back-linked
+      finalContactIds.forEach(cId => {
+        const cIdx = this.contacts.findIndex(c => c.id === cId);
+        if (cIdx !== -1) {
+          const contact = this.contacts[cIdx];
+          let cChanged = false;
+          if (contact.opportunityId !== opp.id) {
+            contact.opportunityId = opp.id;
+            cChanged = true;
+          }
+          if (contact.opportunityTitle !== opp.title) {
+            contact.opportunityTitle = opp.title;
+            cChanged = true;
+          }
+          const oppIds = new Set(contact.opportunityIds || []);
+          if (!oppIds.has(opp.id)) {
+            oppIds.add(opp.id);
+            contact.opportunityIds = Array.from(oppIds);
+            cChanged = true;
+          }
+          if (cChanged) {
+            this.contacts[cIdx] = { ...contact };
+            changed = true;
+          }
+        }
+      });
+
+      return opp;
+    });
+
+    if (changed && this.currentUserId) {
+      this.saveToUserLocalStorage(this.currentUserId);
+    }
+  }
+
+  syncOpportunityContactsInternal(opp: Opportunity): Opportunity {
+    if (!opp) return opp;
+
+    const contactIdSet = new Set<string>(opp.contactIds || []);
+    const recruiter = opp.recruiterContact || opp.extractedInfo?.recruiterContact;
+
+    if (recruiter) {
+      const rawName = (recruiter.name || "").trim();
+      const rawEmail = (recruiter.email || "").trim().toLowerCase();
+      const rawLinkedin = (recruiter.linkedinUrl || recruiter.linkedin || "").trim();
+      const rawRole = (recruiter.role || "").trim();
+      const rawPhone = (recruiter.phone || "").trim();
+
+      if (rawName || rawEmail || rawLinkedin) {
+        const resolution = resolveContact(
+          {
+            fullName: rawName,
+            email: rawEmail,
+            linkedInUrl: rawLinkedin,
+            companyName: opp.companyName
+          },
+          this.contacts
+        );
+
+        let targetContactId = recruiter.contactId || recruiter.id || "";
+
+        if (resolution.matchedContact && (resolution.decision === "certain" || resolution.decision === "probable")) {
+          const existing = resolution.matchedContact;
+          targetContactId = existing.id;
+
+          const merged = mergeContactData(existing, {
+            email: rawEmail || existing.email,
+            phone: rawPhone || existing.phone,
+            linkedInUrl: rawLinkedin || existing.linkedInUrl,
+            companyName: opp.companyName || existing.companyName,
+            companyId: opp.companyId || existing.companyId,
+            jobTitle: rawRole || existing.jobTitle,
+            opportunityId: opp.id,
+            opportunityTitle: opp.title
+          });
+
+          const currentHistory = merged.history || [];
+          if (!currentHistory.some(h => h.label && h.label.includes(opp.title))) {
+            merged.history = [
+              ...currentHistory,
+              {
+                id: "hist_" + Math.random().toString(36).substring(2, 9),
+                type: "opportunity_linked",
+                label: `Associé à l'opportunité "${opp.title}" chez ${opp.companyName}`,
+                timestamp: new Date().toISOString()
+              }
+            ];
+          }
+          merged.opportunityId = opp.id;
+          merged.opportunityTitle = opp.title;
+          const oppIds = new Set(merged.opportunityIds || []);
+          oppIds.add(opp.id);
+          merged.opportunityIds = Array.from(oppIds);
+
+          this.contacts = this.contacts.map(c => c.id === targetContactId ? merged : c);
+        } else {
+          const cleanName = cleanPersonDisplayName(rawName) || rawName || `Contact ${opp.companyName}`;
+          const nameParts = cleanName.split(" ").filter(Boolean);
+          const firstName = nameParts[0] || "";
+          const lastName = nameParts.slice(1).join(" ") || "";
+          const isHR = /recrut|rh|ressources humaines|talent|people|headhunter/i.test(rawRole);
+
+          const { company: resCo } = resolveCompany({ companyName: opp.companyName, companyId: opp.companyId });
+
+          const newContact: Contact = {
+            id: "cont_" + Math.random().toString(36).substring(2, 9),
+            fullName: cleanName,
+            firstName,
+            lastName,
+            companyId: resCo.id,
+            companyName: resCo.name,
+            jobTitle: rawRole || "Recruteur / Interlocuteur",
+            normalizedJobTitle: rawRole || "Recruteur / Interlocuteur",
+            category: isHR ? "recruiter" : "sector_pro",
+            relevanceScore: 85,
+            connectionPoints: [`Interlocuteur principal pour l'opportunité "${opp.title}"`],
+            previousCompanies: [],
+            notes: `Contact créé automatiquement lors de l'enregistrement de l'opportunité "${opp.title}" chez ${opp.companyName}.`,
+            email: rawEmail || undefined,
+            phone: rawPhone || undefined,
+            linkedInUrl: rawLinkedin || undefined,
+            opportunityId: opp.id,
+            opportunityTitle: opp.title,
+            opportunityIds: [opp.id],
+            history: [
+              {
+                id: "hist_" + Math.random().toString(36).substring(2, 9),
+                type: "opportunity_linked",
+                label: `Créé automatiquement via l'opportunité "${opp.title}" chez ${opp.companyName}`,
+                timestamp: new Date().toISOString()
+              }
+            ],
+            createdAt: new Date().toISOString()
+          };
+
+          this.contacts.push(newContact);
+          targetContactId = newContact.id;
+        }
+
+        contactIdSet.add(targetContactId);
+
+        opp.recruiterContact = {
+          ...recruiter,
+          id: targetContactId,
+          contactId: targetContactId,
+          name: rawName || recruiter.name,
+          role: rawRole || recruiter.role,
+          email: rawEmail || recruiter.email,
+          phone: rawPhone || recruiter.phone,
+          linkedinUrl: rawLinkedin || recruiter.linkedinUrl || recruiter.linkedin
+        };
+      }
+    }
+
+    const finalContactIds = Array.from(contactIdSet);
+
+    // Ensure all contacts in finalContactIds have this opportunity linked
+    finalContactIds.forEach(cId => {
+      const idx = this.contacts.findIndex(c => c.id === cId);
+      if (idx !== -1) {
+        const c = this.contacts[idx];
+        const oppIds = new Set(c.opportunityIds || []);
+        oppIds.add(opp.id);
+        this.contacts[idx] = {
+          ...c,
+          opportunityId: c.opportunityId || opp.id,
+          opportunityTitle: c.opportunityTitle || opp.title,
+          opportunityIds: Array.from(oppIds)
+        };
+      }
+    });
+
+    return {
+      ...opp,
+      contactIds: finalContactIds
+    };
+  }
+
+  associateContactWithOpportunity(opportunityId: string, contactId: string) {
+    const opp = this.opportunities.find(o => o.id === opportunityId);
+    if (!opp) return;
+
+    const contactSet = new Set(opp.contactIds || []);
+    contactSet.add(contactId);
+    opp.contactIds = Array.from(contactSet);
+
+    const contact = this.contacts.find(c => c.id === contactId);
+    if (contact) {
+      contact.opportunityId = opp.id;
+      contact.opportunityTitle = opp.title;
+      const oppIds = new Set(contact.opportunityIds || []);
+      oppIds.add(opp.id);
+      contact.opportunityIds = Array.from(oppIds);
+
+      const history = contact.history || [];
+      if (!history.some(h => h.label && h.label.includes(opp.title))) {
+        history.push({
+          id: "hist_" + Math.random().toString(36).substring(2, 9),
+          type: "opportunity_linked",
+          label: `Associé à l'opportunité "${opp.title}" chez ${opp.companyName}`,
+          timestamp: new Date().toISOString()
+        });
+        contact.history = history;
+      }
+    }
+
+    this.updateOpportunity(opp);
+  }
+
+  disassociateContactFromOpportunity(opportunityId: string, contactId: string) {
+    const opp = this.opportunities.find(o => o.id === opportunityId);
+    if (!opp) return;
+
+    opp.contactIds = (opp.contactIds || []).filter(id => id !== contactId);
+    if (opp.recruiterContact?.contactId === contactId || opp.recruiterContact?.id === contactId) {
+      opp.recruiterContact = {
+        ...opp.recruiterContact,
+        contactId: undefined,
+        id: undefined
+      };
+    }
+
+    const contact = this.contacts.find(c => c.id === contactId);
+    if (contact) {
+      if (contact.opportunityId === opportunityId) {
+        contact.opportunityId = undefined;
+        contact.opportunityTitle = undefined;
+      }
+      if (contact.opportunityIds) {
+        contact.opportunityIds = contact.opportunityIds.filter(id => id !== opportunityId);
+      }
+    }
+
+    this.updateOpportunity(opp);
+  }
+
   addOpportunity(opp: Omit<Opportunity, "id" | "createdAt" | "updatedAt">): Opportunity {
     const { company: resCo } = resolveCompany({ companyName: opp.companyName, companyId: opp.companyId });
-    const newOpp: Opportunity = {
+    let newOpp: Opportunity = {
       ...opp,
       companyId: resCo.id,
       companyName: resCo.name,
@@ -964,6 +1254,9 @@ class DBStore {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
+
+    newOpp = this.syncOpportunityContactsInternal(newOpp);
+
     this.opportunities.push(newOpp);
     this.recalculateCompanyCounters();
     this.notify();
@@ -972,12 +1265,15 @@ class DBStore {
 
   updateOpportunity(opp: Opportunity) {
     const { company: resCo } = resolveCompany({ companyName: opp.companyName, companyId: opp.companyId });
-    const updatedOpp: Opportunity = {
+    let updatedOpp: Opportunity = {
       ...opp,
       companyId: resCo.id,
       companyName: resCo.name,
       updatedAt: new Date().toISOString()
     };
+
+    updatedOpp = this.syncOpportunityContactsInternal(updatedOpp);
+
     this.opportunities = this.opportunities.map(o => o.id === updatedOpp.id ? updatedOpp : o);
     this.recalculateCompanyCounters();
     this.notify();
@@ -1231,9 +1527,360 @@ class DBStore {
     this.notify();
   }
 
-  // Calendar Event Operations
-  getCalendarEvents(): CalendarEvent[] {
+  // Calendar Event Operations & Global Synchronization Engine
+  syncGlobalCalendarEvents(): CalendarEvent[] {
+    const derivedMap = new Map<string, CalendarEvent>();
+    const todayStr = new Date().toISOString().split("T")[0];
+
+    const addDaysToIso = (dateStr: string, days: number): string => {
+      try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) {
+          const now = new Date();
+          now.setDate(now.getDate() + days);
+          return now.toISOString().split("T")[0];
+        }
+        d.setDate(d.getDate() + days);
+        return d.toISOString().split("T")[0];
+      } catch {
+        const now = new Date();
+        now.setDate(now.getDate() + days);
+        return now.toISOString().split("T")[0];
+      }
+    };
+
+    // 1. DÉRIVER LES ÉVÉNEMENTS DEPUIS LES OPPORTUNITÉS
+    if (Array.isArray(this.opportunities)) {
+      this.opportunities.forEach(opp => {
+        const isClosed = opp.status === 'refused' || opp.status === 'archived';
+
+        // A. Date limite d'opportunité (Deadline)
+        if (opp.deadline) {
+          const id = `evt_opp_${opp.id}_deadline`;
+          derivedMap.set(id, {
+            id,
+            title: `Date limite : ${opp.title}`,
+            date: opp.deadline,
+            type: 'deadline',
+            sourceType: 'opportunity',
+            sourceId: opp.id,
+            opportunityId: opp.id,
+            opportunityTitle: opp.title,
+            companyName: opp.companyName,
+            companyId: opp.companyId,
+            syncStatus: 'confirmed',
+            priority: 'high',
+            actionable: true,
+            isAutoDerived: true,
+            notes: `Échéance de candidature ou de réponse pour ${opp.title} chez ${opp.companyName}.`,
+            completed: false,
+            createdAt: opp.createdAt || new Date().toISOString()
+          });
+        }
+
+        // B. Date de début de contrat / stage
+        if (opp.startDate) {
+          const id = `evt_opp_${opp.id}_start`;
+          derivedMap.set(id, {
+            id,
+            title: `Prise de poste : ${opp.title}`,
+            date: opp.startDate,
+            type: 'event',
+            sourceType: 'opportunity',
+            sourceId: opp.id,
+            opportunityId: opp.id,
+            opportunityTitle: opp.title,
+            companyName: opp.companyName,
+            companyId: opp.companyId,
+            syncStatus: 'confirmed',
+            priority: 'medium',
+            actionable: false,
+            isAutoDerived: true,
+            notes: `Prise de poste prévisionnelle pour le poste ${opp.title} chez ${opp.companyName}.`,
+            completed: false,
+            createdAt: opp.createdAt || new Date().toISOString()
+          });
+        }
+
+        // C. Suivi & Relance après dépôt de candidature
+        if (!isClosed && (opp.status === 'candidated' || opp.status === 'applied' || opp.status === 'to_apply')) {
+          const followUpDate = addDaysToIso(opp.updatedAt || opp.createdAt || todayStr, 7);
+          const id = `evt_opp_${opp.id}_followup`;
+          derivedMap.set(id, {
+            id,
+            title: `Relance candidature : ${opp.title}`,
+            date: followUpDate,
+            type: 'follow_up',
+            sourceType: 'opportunity',
+            sourceId: opp.id,
+            opportunityId: opp.id,
+            opportunityTitle: opp.title,
+            companyName: opp.companyName,
+            companyId: opp.companyId,
+            syncStatus: 'calculated',
+            priority: 'medium',
+            actionable: true,
+            isAutoDerived: true,
+            notes: `Relance conseillée à J+7 après votre candidature chez ${opp.companyName}.`,
+            completed: false,
+            createdAt: opp.createdAt || new Date().toISOString()
+          });
+        }
+
+        // D. Entretiens prévus
+        if (!isClosed && (opp.status === 'interview_1' || opp.status === 'interview_2' || opp.status === 'interview_3' || opp.status === 'interview' || opp.status === 'proposal')) {
+          const id = `evt_opp_${opp.id}_interview`;
+          const interviewDate = opp.recruiterContact?.meetingDate || addDaysToIso(opp.updatedAt || todayStr, 2);
+          derivedMap.set(id, {
+            id,
+            title: opp.status === 'proposal' ? `Échéance proposition : ${opp.title}` : `Entretien : ${opp.title}`,
+            date: interviewDate,
+            type: opp.status === 'proposal' ? 'deadline' : 'interview',
+            sourceType: 'opportunity',
+            sourceId: opp.id,
+            opportunityId: opp.id,
+            opportunityTitle: opp.title,
+            companyName: opp.companyName,
+            companyId: opp.companyId,
+            syncStatus: 'confirmed',
+            priority: 'high',
+            actionable: true,
+            isAutoDerived: true,
+            notes: `Session d'entretien ou point de décision pour ${opp.title} chez ${opp.companyName}.`,
+            completed: false,
+            createdAt: opp.createdAt || new Date().toISOString()
+          });
+
+          // Crénau dédié de préparation avant l'entretien (J-1)
+          if (opp.status !== 'proposal') {
+            const prepId = `evt_opp_${opp.id}_prep`;
+            const prepDate = addDaysToIso(interviewDate, -1);
+            derivedMap.set(prepId, {
+              id: prepId,
+              title: `Préparation entretien : ${opp.title}`,
+              date: prepDate,
+              type: 'preparation',
+              sourceType: 'opportunity',
+              sourceId: opp.id,
+              opportunityId: opp.id,
+              opportunityTitle: opp.title,
+              companyName: opp.companyName,
+              companyId: opp.companyId,
+              syncStatus: 'calculated',
+              priority: 'high',
+              actionable: true,
+              isAutoDerived: true,
+              notes: `Temps dédié à la préparation de votre entretien chez ${opp.companyName} (J-1) : analyser l'offre, réviser la fiche entreprise et préparer vos questions.`,
+              completed: false,
+              createdAt: opp.createdAt || new Date().toISOString()
+            });
+          }
+        }
+
+        // E. Étapes du workflow
+        if (Array.isArray(opp.workflowHistory)) {
+          opp.workflowHistory.forEach((step, idx) => {
+            const isCompleted = step.status === 'completed' || step.completed;
+            const name = step.stepName || step.title || `Étape ${idx + 1}`;
+            if (step.date && !isCompleted && !isClosed) {
+              const id = `evt_opp_${opp.id}_step_${idx}`;
+              derivedMap.set(id, {
+                id,
+                title: `${name} : ${opp.title}`,
+                date: step.date,
+                type: name.toLowerCase().includes('entretien') ? 'interview' : 'task',
+                sourceType: 'opportunity',
+                sourceId: opp.id,
+                opportunityId: opp.id,
+                opportunityTitle: opp.title,
+                companyName: opp.companyName,
+                companyId: opp.companyId,
+                syncStatus: 'confirmed',
+                priority: 'high',
+                actionable: true,
+                isAutoDerived: true,
+                notes: step.notes || `Étape "${name}" du processus de recrutement chez ${opp.companyName}.`,
+                completed: false,
+                createdAt: step.date
+              });
+            }
+          });
+        }
+      });
+    }
+
+    // 2. DÉRIVER LES ÉVÉNEMENTS DEPUIS LES CONTACTS & LE RÉSEAU
+    if (Array.isArray(this.contacts)) {
+      this.contacts.forEach(contact => {
+        const isInactive = contact.networkingStatus === 'sans_suite' || contact.networkingStatus === 'not_interested';
+
+        // A. Prochaine relance explicite
+        if (contact.nextFollowUpDate && !isInactive) {
+          const id = `evt_cont_${contact.id}_next_followup`;
+          derivedMap.set(id, {
+            id,
+            title: `Relance réseau : ${contact.fullName}`,
+            date: contact.nextFollowUpDate,
+            type: 'follow_up',
+            sourceType: 'contact',
+            sourceId: contact.id,
+            contactId: contact.id,
+            companyName: contact.companyName,
+            companyId: contact.companyId,
+            opportunityId: contact.opportunityId,
+            opportunityTitle: contact.opportunityTitle,
+            syncStatus: 'confirmed',
+            priority: 'high',
+            actionable: true,
+            isAutoDerived: true,
+            notes: `Relance programmée avec ${contact.fullName} (${contact.jobTitle || "Contact"} chez ${contact.companyName || "Entreprise"}).`,
+            completed: false,
+            createdAt: contact.createdAt || new Date().toISOString()
+          });
+        }
+
+        // B. Action réseau explicite
+        if (contact.nextAction?.dueDate && !isInactive) {
+          const id = `evt_cont_${contact.id}_next_action`;
+          derivedMap.set(id, {
+            id,
+            title: `Action réseau : ${contact.nextAction.label || contact.fullName}`,
+            date: contact.nextAction.dueDate,
+            type: 'task',
+            sourceType: 'contact',
+            sourceId: contact.id,
+            contactId: contact.id,
+            companyName: contact.companyName,
+            companyId: contact.companyId,
+            opportunityId: contact.opportunityId,
+            opportunityTitle: contact.opportunityTitle,
+            syncStatus: 'confirmed',
+            priority: 'medium',
+            actionable: true,
+            isAutoDerived: true,
+            notes: `Action réseau prévue avec ${contact.fullName}.`,
+            completed: false,
+            createdAt: contact.createdAt || new Date().toISOString()
+          });
+        }
+
+        // C. Réponse reçue à traiter
+        if ((contact.networkingStatus === 'reponse_recue' || contact.networkingStatus === 'reponse_a_traiter') && !isInactive) {
+          const id = `evt_cont_${contact.id}_reply_needed`;
+          const replyDate = contact.lastOutreachDate ? contact.lastOutreachDate.split("T")[0] : todayStr;
+          derivedMap.set(id, {
+            id,
+            title: `Réponse reçue : ${contact.fullName}`,
+            date: replyDate,
+            type: 'follow_up',
+            sourceType: 'contact',
+            sourceId: contact.id,
+            contactId: contact.id,
+            companyName: contact.companyName,
+            companyId: contact.companyId,
+            opportunityId: contact.opportunityId,
+            opportunityTitle: contact.opportunityTitle,
+            syncStatus: 'ai_suggestion',
+            priority: 'high',
+            actionable: true,
+            isAutoDerived: true,
+            notes: `${contact.fullName} a répondu à votre message. Répondez ou fixez un créneau d'échange.`,
+            completed: false,
+            createdAt: replyDate
+          });
+        }
+
+        // D. Relance à faire basée sur la stratégie réseau
+        if ((contact.networkingStatus === 'relance_a_faire' || contact.networkingStatus === 'a_contacter') && !contact.nextFollowUpDate && !isInactive) {
+          const id = `evt_cont_${contact.id}_auto_followup`;
+          const calcDate = addDaysToIso(contact.lastOutreachDate || contact.initialMessageSentDate || contact.createdAt || todayStr, 7);
+          derivedMap.set(id, {
+            id,
+            title: `Relancer : ${contact.fullName}`,
+            date: calcDate,
+            type: 'follow_up',
+            sourceType: 'contact',
+            sourceId: contact.id,
+            contactId: contact.id,
+            companyName: contact.companyName,
+            companyId: contact.companyId,
+            opportunityId: contact.opportunityId,
+            opportunityTitle: contact.opportunityTitle,
+            syncStatus: 'calculated',
+            priority: 'medium',
+            actionable: true,
+            isAutoDerived: true,
+            notes: `Relance calculée à J+7 après le dernier message à ${contact.fullName}.`,
+            completed: false,
+            createdAt: contact.createdAt || new Date().toISOString()
+          });
+        }
+
+        // E. Rendez-vous téléphonique / Café réseau
+        if (contact.networkingStatus === 'appel_prevu' && !isInactive) {
+          const id = `evt_cont_${contact.id}_call_scheduled`;
+          const callDate = contact.nextFollowUpDate || addDaysToIso(todayStr, 1);
+          derivedMap.set(id, {
+            id,
+            title: `Échange téléphonique / Café : ${contact.fullName}`,
+            date: callDate,
+            type: 'meeting',
+            sourceType: 'contact',
+            sourceId: contact.id,
+            contactId: contact.id,
+            companyName: contact.companyName,
+            companyId: contact.companyId,
+            opportunityId: contact.opportunityId,
+            opportunityTitle: contact.opportunityTitle,
+            syncStatus: 'confirmed',
+            priority: 'high',
+            actionable: true,
+            isAutoDerived: true,
+            notes: `Rendez-vous planifié avec ${contact.fullName} (${contact.companyName || "Entreprise"}).`,
+            completed: false,
+            createdAt: contact.createdAt || new Date().toISOString()
+          });
+        }
+      });
+    }
+
+    // 3. FUSIONNER DÉTERMINISTEMENT SANS DOUBLONS & CONSERVER LES MODIFICATIONS
+    const existingMap = new Map<string, CalendarEvent>();
+    (this.calendarEvents || []).forEach(evt => {
+      existingMap.set(evt.id, evt);
+    });
+
+    const finalEvents: CalendarEvent[] = [];
+
+    // Conserver les événements manuels, Google, ou créés indépendamment
+    existingMap.forEach((evt) => {
+      if (!evt.isAutoDerived && evt.sourceType !== 'opportunity' && evt.sourceType !== 'contact') {
+        finalEvents.push(evt);
+      }
+    });
+
+    // Mettre à jour / ajouter les événements dérivés
+    derivedMap.forEach((derivedEvt, id) => {
+      const existing = existingMap.get(id);
+      if (existing) {
+        finalEvents.push({
+          ...derivedEvt,
+          completed: existing.completed ?? derivedEvt.completed,
+          time: existing.time || derivedEvt.time,
+          notes: existing.notes && existing.notes !== derivedEvt.notes ? existing.notes : derivedEvt.notes,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        finalEvents.push(derivedEvt);
+      }
+    });
+
+    this.calendarEvents = finalEvents;
     return this.calendarEvents;
+  }
+
+  getCalendarEvents(): CalendarEvent[] {
+    return this.syncGlobalCalendarEvents();
   }
 
   addCalendarEvent(event: Omit<CalendarEvent, "id" | "createdAt">): CalendarEvent {
@@ -1248,7 +1895,37 @@ class DBStore {
   }
 
   updateCalendarEvent(event: CalendarEvent) {
+    const prev = this.calendarEvents.find(e => e.id === event.id);
     this.calendarEvents = this.calendarEvents.map(e => e.id === event.id ? event : e);
+
+    // Synchronisation bidirectionnelle vers la source
+    if (prev && prev.completed !== event.completed) {
+      if (event.sourceType === 'contact' && event.contactId) {
+        const c = this.contacts.find(ct => ct.id === event.contactId);
+        if (c && event.completed) {
+          const updatedContact: Contact = {
+            ...c,
+            nextFollowUpDate: undefined,
+            networkingStatus: c.networkingStatus === 'relance_a_faire' ? 'echange_en_cours' : c.networkingStatus,
+            lastOutreachDate: new Date().toISOString()
+          };
+          this.updateContact(updatedContact);
+        }
+      } else if (event.sourceType === 'opportunity' && event.opportunityId) {
+        const o = this.opportunities.find(opp => opp.id === event.opportunityId);
+        if (o && event.completed && Array.isArray(o.workflowHistory)) {
+          const updatedHistory = o.workflowHistory.map(step => {
+            const stepTitle = (step.stepName || step.title || "").toLowerCase();
+            if (stepTitle.includes('entretien') || stepTitle.includes('relance')) {
+              return { ...step, status: 'completed' as const, completed: true };
+            }
+            return step;
+          });
+          this.updateOpportunity({ ...o, workflowHistory: updatedHistory });
+        }
+      }
+    }
+
     this.notify();
   }
 
@@ -1283,7 +1960,7 @@ class DBStore {
     return this.chatSessions;
   }
 
-  addChatSession(personaId: string, title: string): ChatSession {
+  addChatSession(personaId: string, title: string, sourcesConfig?: any): ChatSession {
     const personaNames: Record<string, string> = {
       general: "Conseiller Carrière",
       interview: "Coach Entretien",
@@ -1298,11 +1975,26 @@ class DBStore {
       personaName: personaNames[personaId] || "NACORA AI",
       title,
       messages: [],
+      sourcesConfig: sourcesConfig || undefined,
       updatedAt: new Date().toISOString()
     };
     this.chatSessions.push(newSess);
     this.notify();
     return newSess;
+  }
+
+  updateChatSessionSources(sessionId: string, sourcesConfig: any) {
+    this.chatSessions = this.chatSessions.map(sess => {
+      if (sess.id === sessionId) {
+        return {
+          ...sess,
+          sourcesConfig: { ...sourcesConfig },
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return sess;
+    });
+    this.notify();
   }
 
   addMessageToSession(sessionId: string, role: "user" | "model", text: string) {
@@ -1636,6 +2328,7 @@ class DBStore {
       savedSearches: this.savedSearches,
       prospectActivities: this.prospectActivities,
       prospectingSettings: this.prospectingSettings,
+      dailyBrief: this.dailyBrief,
       aiUsageRecords: this.aiUsageRecords,
       aiUsageSettings: this.aiUsageSettings
     };
@@ -1696,6 +2389,9 @@ class DBStore {
       }
       if (data.prospectingSettings && typeof data.prospectingSettings === "object") {
         this.prospectingSettings = { ...this.prospectingSettings, ...data.prospectingSettings };
+      }
+      if (data.dailyBrief && typeof data.dailyBrief === "object") {
+        this.dailyBrief = data.dailyBrief;
       }
       if (Array.isArray(data.aiUsageRecords)) {
         this.aiUsageRecords = data.aiUsageRecords;

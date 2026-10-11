@@ -147,15 +147,33 @@ export interface CandidateProfile {
   profileCompletionScore: number; // 0 - 100
 }
 
-export type OpportunityStatus = 'saved' | 'to_prepare' | 'to_study' | 'to_apply';
+export type OpportunityStatus = 
+  | 'to_explore'
+  | 'to_prepare'
+  | 'applied'
+  | 'in_process'
+  | 'saved' 
+  | 'to_study' 
+  | 'to_apply' 
+  | 'candidated' 
+  | 'interview_1' 
+  | 'interview_2' 
+  | 'interview_3' 
+  | 'interview' 
+  | 'proposal' 
+  | 'refused' 
+  | 'archived';
 
 export interface RecruiterContact {
+  id?: string;
+  contactId?: string;
   name?: string;
   role?: string;
   email?: string;
   phone?: string;
   linkedin?: string;
   linkedinUrl?: string;
+  meetingDate?: string;
 }
 
 export interface EnterpriseDetails {
@@ -173,10 +191,12 @@ export interface WorkflowStepItem {
   step: number; // 1 to 9
   id: string;
   title: string;
+  stepName?: string;
   desc: string;
   status: 'completed' | 'current' | 'upcoming';
   date?: string;
   notes?: string;
+  completed?: boolean;
 }
 
 export interface ExtractedJobInfo {
@@ -214,6 +234,7 @@ export interface Opportunity {
   workflowStep?: number; // 1 to 9
   workflowHistory?: WorkflowStepItem[];
   recruiterContact?: RecruiterContact;
+  contactIds?: string[];
   createdAt: string;
   updatedAt: string;
   aiExtracted: boolean;
@@ -449,7 +470,7 @@ export interface NetworkingOutreachStrategy {
     preferredDays: string;
     relance1: string;
     relance2: string;
-    relance3: string;
+    relance3?: string;
   };
 }
 
@@ -496,6 +517,7 @@ export interface Contact {
   networkingStatus?: ContactNetworkingStatus;
   opportunityId?: string;
   opportunityTitle?: string;
+  opportunityIds?: string[];
   history?: ContactHistoryEvent[];
 
   // Multidimensional classification
@@ -568,18 +590,42 @@ export interface Company {
   noteCount: number;
 }
 
+export type CalendarEventType = 'interview' | 'deadline' | 'follow_up' | 'task' | 'meeting' | 'preparation' | 'event' | 'other';
+export type CalendarEventSourceType = 'opportunity' | 'contact' | 'company' | 'task' | 'document' | 'manual' | 'google';
+export type CalendarEventSyncStatus = 'confirmed' | 'calculated' | 'ai_suggestion';
+export type CalendarEventPriority = 'high' | 'medium' | 'low';
+
 export interface CalendarEvent {
   id: string;
   title: string;
   date: string; // YYYY-MM-DD
-  time?: string; // HH:MM
-  type: 'interview' | 'deadline' | 'follow_up' | 'other';
+  time?: string; // HH:mm
+  type: CalendarEventType;
+  
+  // Source Entity Linking
+  sourceType?: CalendarEventSourceType;
+  sourceId?: string;
+  contactId?: string;
+  companyId?: string;
+  taskId?: string;
+  documentId?: string;
+  
   opportunityId?: string;
   opportunityTitle?: string;
   companyName?: string;
+  
+  // Intelligence, Status & Priority
+  syncStatus?: CalendarEventSyncStatus; // 'confirmed' | 'calculated' | 'ai_suggestion'
+  priority?: CalendarEventPriority; // 'high' | 'medium' | 'low'
+  actionable?: boolean;
+  isAutoDerived?: boolean;
+  
   notes: string;
   completed: boolean;
   createdAt: string;
+  updatedAt?: string;
+  
+  // Google Workspace Integration
   googleEventId?: string;
   isGoogleEvent?: boolean;
   location?: string;
@@ -625,6 +671,18 @@ export interface ChatMessage {
   timestamp: string;
 }
 
+export interface SessionSourceConfig {
+  oppIds?: string[];
+  contactIds?: string[];
+  docIds?: string[];
+  companyIds?: string[];
+  includeProfile?: boolean;
+  includeCalendar?: boolean;
+  notes?: string;
+  activeFocusId?: string;
+  activeFocusType?: 'opportunity' | 'contact' | 'document' | 'company';
+}
+
 export interface ChatSession {
   id: string;
   personaId: string; // 'general' | 'interview' | 'cv_letter' | 'networking' | 'negotiation'
@@ -632,6 +690,7 @@ export interface ChatSession {
   title: string;
   messages: ChatMessage[];
   updatedAt: string;
+  sourcesConfig?: SessionSourceConfig;
 }
 
 export interface ToastState {

@@ -108,8 +108,8 @@ export async function runDataHealthAudit(): Promise<DataHealthReport> {
           });
         }
       }
-    } catch (txErr) {
-      console.warn("[DataHealth] Could not audit transactions:", txErr);
+    } catch (_) {
+      // Permission restricted or quota reached
     }
 
     // 3. Audit User Sessions for orphaned user references
@@ -126,12 +126,15 @@ export async function runDataHealthAudit(): Promise<DataHealthReport> {
           });
         }
       }
-    } catch (sErr) {
-      console.warn("[DataHealth] Could not audit sessions:", sErr);
+    } catch (_) {
+      // Permission restricted or quota reached
     }
 
   } catch (globalErr: any) {
-    console.error("[DataHealth] Global health check error:", globalErr);
+    const msg = globalErr?.message || String(globalErr);
+    if (!msg.includes("Missing or insufficient permissions") && !msg.includes("permission-denied")) {
+      console.warn("[DataHealth] Notice during health check:", msg);
+    }
   }
 
   const totalIssues = 

@@ -69,6 +69,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const establishUserSession = (uid: string, email: string, displayName: string, photoURL?: string) => {
+    // If switching user, wipe any previously loaded in-memory state immediately (0ms)
+    if (currentUser && currentUser.uid !== uid) {
+      dbStore.clearUser();
+    }
     const user: SimulatedUser = {
       uid,
       email: email.trim().toLowerCase(),
@@ -125,6 +129,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         cachedAccessToken = null;
         setAccessToken(null);
+        setCurrentUser(null);
+        dbStore.clearUser();
+        if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+          try {
+            localStorage.removeItem("nacora_active_session");
+          } catch (_) {}
+        }
       }
       setLoading(false);
     }, (error) => {
@@ -147,7 +158,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     clearError();
     try {
       const provider = createGoogleLoginProvider();
+      console.log("[Auth] Calling signInWithPopup...");
+      const startPopup = Date.now();
       const result = await signInWithPopup(auth, provider);
+      console.log(`[Auth] signInWithPopup took ${Date.now() - startPopup}ms`);
       const user = result.user;
       const credential = GoogleAuthProvider.credentialFromResult(result);
       const token = credential?.accessToken || null;
@@ -253,12 +267,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (_) {}
     }
     dbStore.clearUser();
+    setCurrentUser(null);
     try {
       await firebaseSignOut(auth);
     } catch {
       // ignore
     }
-    setCurrentUser(null);
   };
 
   return (

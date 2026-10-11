@@ -60,6 +60,7 @@ export default function App() {
   const [activePersona, setActivePersona] = useState<string>("general");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [selectedOppId, setSelectedOppId] = useState<string | null>(null);
   const [profile, setProfile] = useState<CandidateProfile>(dbStore.getProfile());
   const [contacts, setContacts] = useState(dbStore.getContacts());
   const { language, t } = useLanguage();
@@ -284,7 +285,7 @@ export default function App() {
     switch (currentView) {
       case "accueil": return { label: t.nav.home, icon: <HomeIcon className="w-4 h-4 text-[#FF6685]" /> };
       case "opportunities": return { label: t.nav.opportunities, icon: <Briefcase className="w-4 h-4 text-[#38BDF8]" /> };
-      case "messages": return { label: "Messages & Suivi", icon: <MessageSquare className="w-4 h-4 text-[#FF6685]" /> };
+      case "messages": return { label: "Networking", icon: <MessageSquare className="w-4 h-4 text-[#FF6685]" /> };
       case "calendrier": return { label: t.nav.calendar, icon: <CalendarIcon className="w-4 h-4 text-[#FBBF24]" /> };
       case "documents": return { label: `${t.nav.documents} & CV`, icon: <FileText className="w-4 h-4 text-[#34D399]" /> };
       case "contacts": return { label: `${t.nav.contacts} & ${language === "en" ? "Network" : "Réseau"}`, icon: <Users className="w-4 h-4 text-[#C084FC]" /> };
@@ -634,10 +635,19 @@ export default function App() {
         {/* Central Workspace Canvas */}
         <div className="px-4 lg:px-6 pt-4 flex-1">
           {currentView === "accueil" && (
-            <Home onNavigate={handleNavigate} showToast={showToast} />
+            <Home key={currentUser?.uid || "guest"} onNavigate={handleNavigate} showToast={showToast} />
           )}
           {currentView === "opportunities" && (
-            <Opportunities showToast={showToast} searchTerm={searchTerm} />
+            <Opportunities 
+              showToast={showToast} 
+              searchTerm={searchTerm} 
+              onOpenContact={(contactId: string) => {
+                setSelectedContactId(contactId);
+                handleNavigate("contacts");
+              }}
+              initialSelectedOppId={selectedOppId}
+              onClearInitialOpp={() => setSelectedOppId(null)}
+            />
           )}
           {currentView === "messages" && (
             <Messages 
@@ -652,7 +662,16 @@ export default function App() {
             />
           )}
           {currentView === "calendrier" && (
-            <Calendar />
+            <Calendar 
+              onNavigateToOpportunity={(oppId: string) => {
+                setSelectedOppId(oppId);
+                handleNavigate("opportunities");
+              }}
+              onNavigateToContact={(contactId: string) => {
+                setSelectedContactId(contactId);
+                handleNavigate("contacts");
+              }}
+            />
           )}
           {currentView === "documents" && (
             <Documents />
@@ -663,6 +682,10 @@ export default function App() {
               searchTerm={searchTerm} 
               initialSelectedContactId={selectedContactId}
               onClearInitialContact={() => setSelectedContactId(null)}
+              onStartConversation={(contactId: string) => {
+                setSelectedContactId(contactId);
+                setCurrentView("messages");
+              }}
             />
           )}
           {currentView === "entreprises" && (
@@ -718,12 +741,12 @@ export default function App() {
         onClose={closeToast}
       />
 
-      {/* 6. Modal d'information Quota Firestore & Mode Local */}
+      {/* 6. Modal d'information Synchronisation Cloud & Mode Local */}
       {isQuotaModalOpen && (
         <Modal
           isOpen={isQuotaModalOpen}
           onClose={() => setIsQuotaModalOpen(false)}
-          title="Mode Hors-Ligne & Synchronisation Cloud"
+          title="État de la Synchronisation Cloud & Mode Local"
           size="md"
         >
           <div className="space-y-4 text-xs">
@@ -731,11 +754,12 @@ export default function App() {
               <span className="w-2.5 h-2.5 rounded-full bg-amber-400 mt-1 shrink-0 animate-pulse" />
               <div className="space-y-1">
                 <span className="font-bold text-amber-300 block">
-                  Quota gratuit journalier Firestore atteint (Spark Plan)
+                  {syncStatus.cloudStatus === "quota_exceeded" 
+                    ? "Limite de quota Cloud Firestore atteinte" 
+                    : "Mode hors-ligne actif (Stockage local sécurisé)"}
                 </span>
                 <p className="text-[#F5F6FA] leading-relaxed">
-                  La limite quotidienne gratuite d'écritures Firestore a été atteinte pour aujourd'hui. 
-                  L'application a automatiquement basculé sur le mode local sécurisé.
+                  {syncStatus.lastCloudError || "L'application fonctionne en mode local sécurisé. Vos modifications sont enregistrées instantanément."}
                 </p>
               </div>
             </div>
@@ -745,31 +769,22 @@ export default function App() {
                 ✓ Vos données sont protégées (0 perte de données)
               </span>
               <p className="text-[#9AA0B2] leading-relaxed">
-                Toutes vos actions, contacts, messages, relances et opportunités sont instantanément enregistrés dans le stockage local de votre navigateur (LocalStorage). Vous pouvez continuer à utiliser l'application normalement.
+                Toutes vos actions (opportunités, contacts, messages, relances) sont conservées dans le stockage local sécurisé de votre navigateur (LocalStorage). Elles seront synchronisées dès le rétablissement de la connexion.
               </p>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-[#9AA0B2] block">
-                Que va-t-il se passer ?
-              </span>
-              <ul className="space-y-1.5 text-[#9AA0B2] list-disc list-inside">
-                <li>Le quota cloud gratuit se réinitialise automatiquement chaque jour (toutes les 24h).</li>
-                <li>Dès réinitialisation, la synchronisation cloud reprendra sans action requise de votre part.</li>
-                <li>Vous pouvez également consulter votre base ou activer la facturation Firebase (Blaze) pour lever les plafonds gratuits.</li>
-              </ul>
-            </div>
-
             <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-3">
-              <a
-                href="https://console.firebase.google.com/project/sturdy-turbine-17dgj/firestore/databases/ai-studio-nacora-b2fd733f-7ae2-4600-af7a-5faf7bad6765/data?openUpgradeDialog=true"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs transition-colors"
+              <button
+                type="button"
+                onClick={() => {
+                  dbStore.retryCloudConnection();
+                  showToast("Tentative de reconnexion au Cloud Firestore...", "info");
+                  setIsQuotaModalOpen(false);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs transition-colors cursor-pointer"
               >
-                <span>Ouvrir la console Firebase</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+                Réessayer la synchronisation
+              </button>
 
               <button
                 onClick={() => setIsQuotaModalOpen(false)}

@@ -296,7 +296,7 @@ export const ConversationImportModal: React.FC<ConversationImportModalProps> = (
 
     setStep("completed");
     showToast(
-      `Import réussi : ${result.importedMessagesCount} message(s) intégrés à la Messagerie !`,
+      `Import réussi : ${result.importedMessagesCount} message(s) intégrés à Networking !`,
       "success"
     );
   };
@@ -1238,7 +1238,7 @@ export const ConversationImportModal: React.FC<ConversationImportModalProps> = (
                   }}
                   icon={<CornerDownRight className="w-4 h-4" />}
                 >
-                  Ouvrir dans la Messagerie
+                  Ouvrir dans Networking
                 </GlassButton>
                 <GlassButton
                   variant="ghost"

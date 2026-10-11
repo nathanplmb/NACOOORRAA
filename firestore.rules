@@ -1,8 +1,58 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Vérification du rôle Administrateur via Custom Claims ou compte de supervision bootstrap
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.role == 'admin' || 
+        request.auth.token.admin == true ||
+        request.auth.token.email == 'nathpa1423@gmail.com'
+      );
+    }
+
+    // Vérification de propriété stricte du document par UID Firebase
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Données privées de l'espace de travail utilisateur : strictement isolées par UID
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+      
+      match /{allChildren=**} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Collections administratives : réservées aux administrateurs ou au propriétaire pour ses propres sessions/crédits
+    match /admins/{uid} {
+      allow read, write: if isAdmin();
+    }
+
+    match /credit_transactions/{txId} {
+      allow read: if isAdmin() || (request.auth != null && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /user_sessions/{sessionId} {
+      allow read, write: if isAdmin() || (request.auth != null && (resource == null || resource.data.userId == request.auth.uid));
+    }
+
+    match /admin_audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /system_activities/{activityId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Verrouillage par défaut pour tout document non géré explicitement
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
     }
   }
 }

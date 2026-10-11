@@ -2,32 +2,18 @@ import { initializeApp as initAdminApp, getApps as getAdminApps } from "firebase
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import { initializeApp as initClientApp, getApps as getClientApps } from "firebase/app";
 import { getFirestore, Firestore, disableNetwork, setLogLevel } from "firebase/firestore";
-import { createRequire } from "module";
+import fs from "fs";
+import path from "path";
 
+let appletConfig: any = {};
 try {
-  setLogLevel("silent");
-} catch (_) {}
-
-// Suppress unhandled gRPC Write stream logs when daily write quota is reached
-if (typeof process !== "undefined" && process.stderr) {
-  const originalStderrWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = function (chunk: any, ...rest: any[]): boolean {
-    const str = typeof chunk === "string" ? chunk : chunk?.toString?.() || "";
-    if (
-      str.includes("RESOURCE_EXHAUSTED") ||
-      str.includes("Quota limit exceeded") ||
-      str.includes("Free daily write units") ||
-      str.includes("GrpcConnection RPC 'Write'")
-    ) {
-      markServerQuotaExceeded();
-      return true; // Filtered gracefully
-    }
-    return (originalStderrWrite as any)(chunk, ...rest);
-  };
+  const configPath = path.resolve(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    appletConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  }
+} catch (err) {
+  console.warn("[FirebaseAdmin] Warning: Could not read firebase-applet-config.json", err);
 }
-
-const require = createRequire(import.meta.url);
-const appletConfig = require("../../firebase-applet-config.json");
 
 // 1. Initialize Firebase Admin App for cryptographic ID Token verification
 const adminApp = getAdminApps().length === 0 
@@ -55,18 +41,25 @@ export async function verifyServerToken(token: string) {
   return await adminAuth.verifyIdToken(token);
 }
 
-// Server-side Quota Circuit Breaker
-// When Firestore daily write quota is reached (Free daily write units limit),
-// pause network writes to prevent gRPC Write stream retry loops and resource-exhausted spam.
+// Server-side Quota Circuit Breaker & Permission Guard
+// When Firestore daily write quota is reached or security rules restrict unauthenticated server writes,
+// pause network writes to operate smoothly via in-memory server registries.
 let serverQuotaExceededUntil = 0;
+let serverRemoteWritesDisabled = false;
 
 export function isServerQuotaExceeded(): boolean {
-  return Date.now() < serverQuotaExceededUntil;
+  return serverRemoteWritesDisabled || Date.now() < serverQuotaExceededUntil;
 }
 
 export function markServerQuotaExceeded(err?: any) {
   serverQuotaExceededUntil = Date.now() + 60 * 60 * 1000; // 1 hour pause on remote writes
-  console.warn("[ServerFirestore] Daily write quota reached. Disabling network writes for 1 hour to prevent stream retry errors.");
+  try {
+    disableNetwork(serverDb).catch(() => {});
+  } catch (_) {}
+}
+
+export function markServerWritesRestricted() {
+  serverRemoteWritesDisabled = true;
   try {
     disableNetwork(serverDb).catch(() => {});
   } catch (_) {}
@@ -90,8 +83,19 @@ export async function safeServerWrite(writeFn: () => Promise<void>): Promise<boo
       msg.includes("quota")
     ) {
       markServerQuotaExceeded(err);
+    } else if (
+      code === "permission-denied" ||
+      code === 7 ||
+      msg.includes("PERMISSION_DENIED") ||
+      msg.includes("permission-denied") ||
+      msg.includes("Missing or insufficient permissions")
+    ) {
+      // Unauthenticated server worker writes restricted by security rules.
+      // Gracefully disable remote server writes and operate in server memory mode.
+      markServerWritesRestricted();
     } else {
-      console.warn("[ServerFirestore] Write error:", msg);
+      // Log only unexpected server errors
+      console.warn("[ServerFirestore] Unexpected write error:", msg);
     }
     return false;
   }

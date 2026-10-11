@@ -13,11 +13,22 @@ import {
 } from "../types.ts";
 import { computePrimaryCategory, isHumanResourcesRole } from "../utils/contactMerger.ts";
 import { CV_FRAMEWORK_SYSTEM_PROMPT } from "./cvFramework.ts";
+import { generateOutreachMessageWithFramework } from "./networkingFramework.ts";
 import { 
-  NETWORKING_FRAMEWORK_SYSTEM_PROMPT,
-  recommendNetworkingStrategy,
-  generateOutreachMessageWithFramework
-} from "./networkingFramework.ts";
+  getCVMethodology,
+  getJobAnalysisMethodology,
+  getCoverLetterMethodology,
+  getEmailMethodology,
+  getNetworkingMethodology,
+  getInterviewMethodology,
+  buildCVPrompt,
+  buildJobAnalysisPrompt,
+  buildCoverLetterPrompt,
+  buildEmailPrompt,
+  buildNetworkingPrompt,
+  buildInterviewPrompt,
+  CareerContextPayload
+} from "./careerMethods.ts";
 import { trackGeminiCall } from "../utils/aiTokenTracker.ts";
 
 // Lazy-initialize Gemini AI to prevent startup crashes if key is missing
@@ -973,12 +984,19 @@ export async function handlePersonaChat(
     companiesCount?: number;
     calendarEventsCount?: number;
     documentsCount?: number;
+    activeSourcesCount?: number;
+    customNotes?: string;
     opportunities?: Array<{ title: string; company: string; status: string; location?: string; salary?: string; keyMissions?: string[] }>;
     contacts?: Array<{ name: string; job: string; company: string; category: string; connectionPoints?: string[] }>;
     companies?: Array<{ name: string; sector?: string }>;
     calendarEvents?: Array<{ title: string; date: string; type: string }>;
     documents?: Array<{ title: string; type: string }>;
-  }
+    selectedOpportunities?: any[];
+    selectedContacts?: any[];
+    selectedCompanies?: any[];
+    selectedDocuments?: any[];
+  },
+  intent?: string
 ): Promise<string> {
   try {
     const ai = getAi();
@@ -987,8 +1005,8 @@ export async function handlePersonaChat(
     let activeFocusBlock = "";
     if (activeFocus && activeFocus.title) {
       activeFocusBlock = `
-=== SUJET D'ÉTUDE ACTIF (CONTEXTE PRIORITAIRE DE LA DISCUSSION) ===
-- Type d'élément : ${activeFocus.type || "Général"}
+=== SOURCE PRINCIPALE ACTIVEMENT ÉTUDIÉE (PRIORITÉ ABSOLUE SUR LA DEMANDE) ===
+- Type d'élément principal : ${activeFocus.type || "Général"}
 - Intitulé / Nom : ${activeFocus.title}
 ${activeFocus.subtitle ? `- Sous-titre / Organisation : ${activeFocus.subtitle}` : ""}
 ${activeFocus.detail ? `- Détails & Données : ${activeFocus.detail}` : ""}
@@ -999,50 +1017,91 @@ ${activeFocus.detail ? `- Détails & Données : ${activeFocus.detail}` : ""}
     // 2. Compile broader NACORA database context summary block
     let nacoraContextBlock = "";
     if (contextSummary) {
-      const oppsStr = (contextSummary.opportunities || [])
-        .map(o => `  * ${o.title} chez ${o.company} (Statut: ${o.status}${o.location ? `, Lieu: ${o.location}` : ""}${o.salary ? `, Gratification/Salaire: ${o.salary}` : ""})`)
-        .join("\n");
+      const oppsList = contextSummary.opportunities || (contextSummary as any).selectedOpportunities || [];
+      const contactsList = contextSummary.contacts || (contextSummary as any).selectedContacts || [];
+      const docsList = contextSummary.documents || (contextSummary as any).selectedDocuments || [];
+      const companiesList = contextSummary.companies || (contextSummary as any).selectedCompanies || [];
+      const customNotesText = contextSummary.customNotes || (contextSummary as any).notes || "";
 
-      const contactsStr = (contextSummary.contacts || [])
-        .slice(0, 8)
-        .map(c => `  * ${c.name} - ${c.job} chez ${c.company} [${c.category}] (Lien: ${(c.connectionPoints || []).join(" | ") || "Réseau"})`)
-        .join("\n");
-
-      const eventsStr = (contextSummary.calendarEvents || [])
-        .slice(0, 5)
-        .map(e => `  * ${e.date} : ${e.title} (${e.type})`)
-        .join("\n");
-
-      const docsStr = (contextSummary.documents || [])
-        .map(d => {
-          const contentExcerpt = (d as any).content ? `\n    Extrait de contenu :\n    """${((d as any).content || "").substring(0, 1500)}"""` : "";
-          return `  * [${d.type}] ${d.title}${contentExcerpt}`;
+      const oppsStr = oppsList
+        .map((o: any) => {
+          const missionsStr = Array.isArray(o.missions) && o.missions.length > 0 ? o.missions.join(" | ") : (o.extractedInfo?.missions ? o.extractedInfo.missions.join(" | ") : "Non spécifiées");
+          const compsStr = Array.isArray(o.competences) && o.competences.length > 0 ? o.competences.join(", ") : (o.extractedInfo?.competencesRequises ? o.extractedInfo.competencesRequises.join(", ") : "");
+          const notesText = o.notes || o.privateNotes || "";
+          return `  * [Opportunité ID: ${o.id || "N/A"}] ${o.title || "Poste"} chez ${o.company || o.companyName || "Entreprise"} (Statut: ${o.status || "En cours"}${o.contractType ? `, Contrat: ${o.contractType}` : ""}${o.location ? `, Lieu: ${o.location}` : ""}${o.salary ? `, Gratification/Rémunération: ${o.salary}` : ""}\n    - Missions : ${missionsStr}${compsStr ? `\n    - Compétences requises : ${compsStr}` : ""}${notesText ? `\n    - Notes : ${notesText}` : ""})`;
         })
         .join("\n\n");
 
+      const contactsStr = contactsList
+        .map((c: any) => `  * [Contact ID: ${c.id || "N/A"}] ${c.name || c.fullName} - ${c.job || c.jobTitle} chez ${c.company || c.companyName} [Catégorie: ${c.category || "Pro"}${c.networkingStatus ? `, Statut CRM: ${c.networkingStatus}` : ""}]${c.connectionPoints ? ` (Points de liaison: ${Array.isArray(c.connectionPoints) ? c.connectionPoints.join(" | ") : c.connectionPoints})` : ""}${c.notes ? ` (Notes: ${c.notes})` : ""}`)
+        .join("\n");
+
+      const eventsStr = (contextSummary.calendarEvents || [])
+        .slice(0, 12)
+        .map((e: any) => `  * ${e.date || e.time} : ${e.title} (${e.type || "Événement"}${e.companyName ? ` - ${e.companyName}` : ""})`)
+        .join("\n");
+
+      const docsStr = docsList
+        .map((d: any) => {
+          const rawContent = d.content || d.snippet || "";
+          const isTruncated = Boolean(d.isTruncated || rawContent.length > 8000);
+          const excerpt = rawContent.slice(0, 8000);
+          const truncationNote = isTruncated ? ` (Note: Document de ${d.totalLength || rawContent.length} car. - Extrait des 8 000 premiers car.)` : "";
+          return `  * [Document ID: ${d.id || "N/A"}] [${d.type || "Fichier"}] ${d.title}${truncationNote}\n    Contenu de la source :\n    """${excerpt}"""`;
+        })
+        .join("\n\n");
+
+      const companiesStr = companiesList
+        .map((comp: any) => `  * [Entreprise] ${comp.name} (${comp.sector || "Secteur non précisé"}${comp.location ? `, Siège: ${comp.location}` : ""}${comp.notes ? `, Notes: ${comp.notes}` : ""})`)
+        .join("\n");
+
       nacoraContextBlock = `
-=== BASE DE DONNÉES NACORA DU CANDIDAT (CONTEXTE SÉLECTIF DISPONIBLE) ===
-- Profil : ${candidateProfile.fullName || "Candidat"} (${candidateProfile.currentSituation || "En formation"})
-- Alternance / Postes actuels : ${candidateProfile.currentAlternance || "Aucune actuellement"}
-- Masters ciblés : ${(candidateProfile.targetMasters || []).join(", ")}
-- Compétences clés : ${(candidateProfile.skills || []).join(", ")}
+=== SOURCES SECONDAIRES & CONTEXTE SÉLECTIONNÉ DANS LE STUDIO ===
+Nombre total de sources secondaires actives : ${contextSummary.activeSourcesCount || (oppsList.length + contactsList.length + docsList.length + companiesList.length)}
 
-- Opportunités en cours (${contextSummary.opportunitiesCount || 0}) :
-${oppsStr || "  * Aucune opportunité enregistrée"}
+- PROFIL CANDIDAT (FAITS VÉRIFIÉS) :
+  * Nom : ${candidateProfile.fullName || "Candidat"} (${candidateProfile.currentSituation || "En recherche / Formation"})
+  * Poste / Alternance actuelle : ${candidateProfile.currentAlternance || "Non renseignée"}
+  * Titres ciblés : ${(candidateProfile.targetTitles || []).join(", ") || "Finance / Banque"}
+  * Compétences clés : ${(candidateProfile.skills || []).join(", ") || "Analyse financière, Gestion"}
+  * Formation : ${(candidateProfile.educations || []).map(e => `${e.degree} (${e.school}, ${e.field})`).join(" | ") || "Non renseignée"}
+  * Expériences : ${(candidateProfile.experiences || []).map(exp => `${exp.role} chez ${exp.company}`).join(" | ") || "Non renseignée"}
 
-- Contacts réseau (${contextSummary.contactsCount || 0}) :
-${contactsStr || "  * Aucun contact réseau enregistré"}
+- OPPORTUNITÉS SÉLECTIONNÉES (${oppsList.length}) :
+${oppsStr || "  * Aucune opportunité sélectionnée"}
 
-- Échéances calendrier (${contextSummary.calendarEventsCount || 0}) :
-${eventsStr || "  * Aucune échéance à venir"}
+- CONTACTS RÉSEAU SÉLECTIONNÉS (${contactsList.length}) :
+${contactsStr || "  * Aucun contact sélectionné"}
 
-- Documents disponibles (${contextSummary.documentsCount || 0}) :
-${docsStr || "  * Aucun document"}
+- DOCUMENTS SÉLECTIONNÉS (${docsList.length}) :
+${docsStr || "  * Aucun document sélectionné"}
+
+- ENTREPRISES CIBLES SÉLECTIONNÉES (${companiesList.length}) :
+${companiesStr || "  * Aucune entreprise sélectionnée"}
+
+- ÉCHÉANCES CALENDRIER DISPONIBLES (${(contextSummary.calendarEvents || []).length}) :
+${eventsStr || "  * Aucune échéance calendrier"}
+
+${customNotesText ? `- NOTES D'INSTRUCTION SUR-MESURE :\n  """${customNotesText}"""` : ""}
 ====================================================================
 `;
     }
 
-    // 3. Define the system instructions based on the selected persona
+    // 3. Directives d'Ancrage et d'Honnêteté Factuelle
+    const groundedDirectivesBlock = `
+=== DIRECTIVES IMPÉRATIVES D'ANCRAGE, DE CONFLIT ET D'ANTI-HALLUCINATION ===
+1. PRIORITÉ DU SUJET ACTIF : L'élément défini dans "SOURCE PRINCIPALE ACTIVEMENT ÉTUDIÉE" (si présent) est la priorité absolue du candidat. Tes conseils, rédactions de lettres, simulations ou analyses DOIVENT se concentrer sur cet élément principal. Les autres "SOURCES SECONDAIRES" servent de contexte complémentaire.
+2. DÉTECTION EXPLICITE DE CONFLITS DE SOURCES : Si la "SOURCE PRINCIPALE" (ex: Poste A chez Revolut) entre en contradiction directe avec d'autres sources secondaires sélectionnées (ex: Fiche B ou Document C concernant une autre entreprise), NE LES FUSIONNE PAS SILENCIEUSEMENT. Avertis explicitement le candidat de l'écart (ex. : "Attention : Votre sujet actif concerne le poste A chez Revolut, alors que le document sélectionné concerne Crédit Agricole. Je base mon analyse sur le poste A.").
+3. RÈGLE STRICTE ANTI-INVENTION FACTUELLE :
+   - Utilise EXCLUSIVEMENT les faits réellement présents dans le profil du candidat et les sources ci-dessus.
+   - Ne JAMAIS inventer de missions, de compétences, de chiffres d'affaires, de gratifications, de contacts ou d'informations d'entreprises non fournis.
+   - Distingue clairement les faits vérifiés, tes déductions logiques et les informations manquantes.
+   - Si les sources sélectionnées manquent de détails (ex: pas de description de poste sur une opportunité), POSE UNE QUESTION PRÉCISE au candidat pour obtenir l'information manquante au lieu d'inventer des missions génériques.
+   - Si AUCUNE source n'est sélectionnée ou que les sources actives ne contiennent pas l'information demandée, indique-le clairement et demande les précisions nécessaires au lieu d'afficher une réponse faussement personnalisée.
+====================================================================
+`;
+
+    // 4. Define the system instructions based on the selected persona
     let specialistRole = "";
     let specialistInstructions = "";
 
@@ -1050,66 +1109,70 @@ ${docsStr || "  * Aucun document"}
       case "general":
         specialistRole = "Conseiller Carrière NACORA";
         specialistInstructions = `
-Tu es le Conseiller Carrière de NACORA, plateforme d'accélération de carrière en Banque, Finance, Gestion de Patrimoine et FinTech.
+${getJobAnalysisMethodology()}
+
+Tu es Chloé Perrin, Conseiller Carrière de NACORA.
 Ton rôle est d'aider le candidat à :
 - Structurer sa recherche d'alternance, de stage ou de premier emploi.
 - Comparer et prioriser les opportunités dans sa base NACORA.
-- Analyser les écarts entre son profil actuel (${candidateProfile.currentSituation || "étudiant"}) et les exigences des offres visées.
-- Donner des conseils stratégiques concrets et un plan d'action étape par étape.
+- Réaliser l'analyse d'adéquation structurée entre son profil actuel (${candidateProfile.currentSituation || "étudiant"}) et les offres visées.
+- Donner des conseils stratégiques concrets et concevoir une feuille de route / plan d'action J+30.
 `;
         break;
 
       case "interview":
         specialistRole = "Coach Entretien NACORA";
         specialistInstructions = `
-Tu es le Coach d'Entretien de NACORA, expert en entraînement aux entretiens du secteur bancaire, financier et des grandes entreprises.
+${getInterviewMethodology()}
+
+Tu es Alexandre Mercier, Coach d'Entretien de NACORA.
 Ton rôle est de :
-- Simuler des entretiens de recrutement réalistes (mises en situation, questions comportementales et techniques).
-- Poser UNE question précise à la fois et attendre la réponse du candidat pour évaluer sa méthode STAR (Situation, Tâche, Action, Résultat).
-- Donner un feedback constructif, bienveillant et chiffré sur ses réponses.
-- Adapter les questions au poste, à l'entreprise ou à l'opportunité active en contexte.
+- Simuler des entretiens de recrutement réalistes (questions comportementales STAR/CAR, questions techniques, questions pièges RH).
+- En mode simulation : poser UNE SEULE question à la fois et attendre la réponse du candidat pour l'évaluer avant de poursuivre.
+- En mode guide ou fiche : fournir une fiche de préparation exhaustive structurée STAR/CAR.
+- Préparer le pitch de 2 minutes, les réponses aux questions pièges RH et les questions pertinentes à poser au recruteur.
 `;
         break;
 
       case "cv_letter":
-        specialistRole = "Coach CV & Expert Lettres NACORA";
+        specialistRole = "Coach CV, Lettres & Mails NACORA";
         specialistInstructions = `
-${CV_FRAMEWORK_SYSTEM_PROMPT}
+${getCVMethodology()}
+${getCoverLetterMethodology()}
+${getEmailMethodology()}
 
-RÔLE OPÉRATIONNEL DANS CETTE DISCUSSION :
-- Tu es le Coach CV & Expert Lettres de NACORA.
-- Quand le candidat te demande d'analyser, de reformuler ou d'optimiser une expérience, un projet ou un CV :
-  1. Applique scrupuleusement la règle anti-invention.
-  2. Structure les puces au format [VERBE D'ACTION FORT] + [CONTEXTE OPÉRATIONNEL] + [RÉSULTAT CHIFFRÉ (si fourni)].
-  3. Ajoute la ligne obligatoire de compétences en italique (*Compétences transférables : ...*).
-  4. Si un résultat mesurable ou un chiffre manque, pose une question de précision bienveillante plutôt que d'inventer.
+Tu es Éléonore de Saint-Germain, Coach CV, Lettres & Mails de NACORA.
+Quand le candidat te sollicite :
+1. ANALYSE D'OFFRE & ADÉQUATION : Évalue les exigences de l'offre active et compare au profil réel.
+2. OPTIMISATION CV & ATS : Rédige des puces d'action [VERBE FORT] + [CONTEXTE] + [RÉSULTAT VÉRIFIÉ], accompagnées de la ligne de compétences transférables en italique. Propose des CV juniors d'une page, titrés et compatibles ATS.
+3. LETTRE "VOUS - MOI - NOUS" : Rédige des lettres de motivation synthétiques (max 1 page), fondées sur des faits réels (Vous: entreprise/poste, Moi: 2-3 preuves du CV, Nous: contribution concrète).
+4. MAILS DE CANDIDATURE : Adapte les mails selon les 3 cas (avec lettre, CV seul, candidature spontanée) avec les conventions "CV_Nom_Prenom.pdf" / "LM_Nom_Prenom.pdf".
+5. Ne fabrique AUCUNE métrique, compétence ou diplôme non vérifié. Si un chiffre manque, pose une question ciblée.
 `;
         break;
 
       case "networking":
         specialistRole = "Stratège Réseau NACORA";
         specialistInstructions = `
-${NETWORKING_FRAMEWORK_SYSTEM_PROMPT}
+${getNetworkingMethodology()}
 
-RÔLE OPÉRATIONNEL DANS CETTE DISCUSSION :
-Tu es le Stratège Réseau & LinkedIn de NACORA.
-Quand le candidat te sollicite pour une prise de contact, une recommandation de profil à contacter, un choix de canal ou une relance :
-1. Applique scrupuleusement la méthodologie de référence NACORA (Templates 1 à 4 et Relances 1 à 3).
-2. Applique les règles de tutoiement (juniors/stagiaires) vs vouvoiement (seniors/managers).
-3. Ne propose JAMAIS d'inventer un lien, une actualité ou un résultat non vérifié.
-4. Explique pourquoi tu recommandes un template spécifique et propose directement le message prêt à envoyer.
+Tu es Sarah Alami, Stratège Réseau & LinkedIn de NACORA.
+Quand le candidat te sollicite pour une prise de contact, une invitation ou une relance :
+1. Invitations LinkedIn : Rédige des messages ultra-courts respectant IMPÉRATIVEMENT la limite stricte de 300 caractères (espaces compris).
+2. Messages InMail / Email : Démarche progressive (découvrir un métier, échange réseau 10 min) sans sollicitation brutale de stage dès le premier message.
+3. Personnalisation authentique : Utilise le poste, l'entreprise et le parcours réel du contact. Pas de fausse relation commune.
+4. Séquences de relance : Relances courtoises à J+7, J+14, J+21 basées sur l'historique réel.
 `;
         break;
 
       case "negotiation":
-        specialistRole = "Négociation Salaire NACORA";
+        specialistRole = "Expert Négociation Salariale NACORA";
         specialistInstructions = `
-Tu es l'Expert en Négociation Salariale de NACORA, spécialiste des packages de rémunération en banque, finance et gestion de patrimoine.
+Tu es Thomas Dubreuil, Expert en Négociation Salariale de NACORA.
 Ton rôle est de :
-- Analyser les propositions de salaire, gratifications d'alternance/stage et packages globaux (fixe, variable, primes conventionnelles, titres-restaurant, transports, intéressement).
-- Préparer des arguments de valeur factuels basés sur les grilles du secteur et les compétences du candidat.
-- Fournir les formulations exactes à utiliser en entretien ou par email.
-- Simuler la négociation avec un recruteur.
+- Analyser les propositions de rémunération (gratification d'alternance/stage, fixe, variable, primes, avantages).
+- Construire une battlecard de négociation chiffrée basée sur les grilles réelles et la valeur du candidat.
+- Fournir des formulations et contre-propositions concrètes sans fausses prétentions.
 `;
         break;
 
@@ -1118,19 +1181,76 @@ Ton rôle est de :
         specialistInstructions = "Tu es le Conseiller Carrière de NACORA. Accompagne le candidat avec expertise et concision.";
     }
 
+    // 5. Dynamic Operational Prompt Construction based on requested task / deliverable format
+    const latestUserMsgText = messages.length > 0 ? messages[messages.length - 1].text.toLowerCase() : "";
+    const careerPayload: CareerContextPayload = {
+      candidateProfile,
+      activeOpportunity: (contextSummary as any)?.opportunities?.[0] || null,
+      activeContact: (contextSummary as any)?.contacts?.[0] || null,
+      selectedDocuments: (contextSummary as any)?.documents || [],
+      customNotes: contextSummary?.customNotes,
+      conversationHistory: messages
+    };
+
+    let activeOperationalPromptBlock = "";
+
+    // 5. Dynamic Operational Prompt Construction based on explicit intent or keyword fallback
+    if (intent) {
+      switch (intent) {
+        case "interview_prep":
+          activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : PRÉPARATION ENTRETIEN (FICHE) ===\n${buildInterviewPrompt(careerPayload, { mode: "prep_guide" })}`;
+          break;
+        case "interview_simulation":
+          activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : SIMULATION ENTRETIEN ===\n${buildInterviewPrompt(careerPayload, { mode: "simulation" })}`;
+          break;
+        case "email_with_letter":
+          activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : MAIL AVEC LETTRE ===\n${buildEmailPrompt(careerPayload, { scenario: "with_cover_letter" })}`;
+          break;
+        case "email_without_letter":
+          activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : MAIL CV SEUL ===\n${buildEmailPrompt(careerPayload, { scenario: "cv_only" })}`;
+          break;
+        case "email_spontaneous":
+          activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : MAIL SPONTANÉ ===\n${buildEmailPrompt(careerPayload, { scenario: "spontaneous" })}`;
+          break;
+        case "networking_invite":
+          activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : INVITE LINKEDIN ===\n${buildNetworkingPrompt(careerPayload, { channel: "linkedin_invite" })}`;
+          break;
+        case "networking_message":
+          activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : MESSAGE LINKEDIN ===\n${buildNetworkingPrompt(careerPayload, { channel: "linkedin_message" })}`;
+          break;
+        case "networking_followup":
+          activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : RELANCE RÉSEAU ===\n${buildNetworkingPrompt(careerPayload, { channel: "follow_up" })}`;
+          break;
+      }
+    }
+
+    // Keyword fallback if no intent passed
+    if (!activeOperationalPromptBlock) {
+      if (latestUserMsgText.includes("lettre de motivation") || latestUserMsgText.includes("cover_letter")) {
+        activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : LETTRE DE MOTIVATION ===\n${buildCoverLetterPrompt(careerPayload)}`;
+      } else if (latestUserMsgText.includes("analyse")) {
+        activeOperationalPromptBlock = `=== CONSTRUCTEUR OPÉRATIONNEL : ANALYSE D'OFFRE ===\n${buildJobAnalysisPrompt(careerPayload)}`;
+      }
+      // ... (add other keyword fallbacks)
+    }
+
     const systemInstruction = `
 ${specialistInstructions}
+
+${activeOperationalPromptBlock}
 
 ${activeFocusBlock}
 
 ${nacoraContextBlock}
 
+${groundedDirectivesBlock}
+
 Directives de réponse (STYLE CLAUDE & CONCISION MAXIMALE) :
 - Tu t'adresses directement à ${candidateProfile.fullName || "le candidat"}.
-- SOIS EXTRÊMEMENT CONCIS ET DIRECT : Maximum 3 à 4 phrases ou puces courtes par réponse. Pas de longs discours, va droit à l'essentiel.
+- SOIS CONCIS ET DIRECT : Maximum 3 à 5 puces courtes ou paragraphes fluides par réponse. Pas de longs discours, va droit à l'essentiel.
 - Évite les préambules inutiles. Zéro blabla.
 - N'utilise pas de titres Markdown encombrants (#). Privilégie le texte direct, le gras et des puces courtes.
-- RÈGLE ABSOLUE POUR LES ACTIONS : À la toute fin de CHAQUE réponse, tu DOIS obligatoirement inclure des boutons d'actions rapides sous la forme [ACTIONS: "..." | "..."] qui sont 100% personnalisés et directement liés au sujet exact dont tu viens de parler (propositions de question-réponse enchaînées pour creuser, rédiger ou simuler la suite). Jamais de suggestions génériques.
+- RÈGLE ABSOLUE POUR LES ACTIONS : À la toute fin de CHAQUE réponse, tu DOIS obligatoirement inclure des boutons d'actions rapides sous la forme [ACTIONS: "..." | "..."] qui sont 100% personnalisés et directement liés au sujet exact dont tu viens de parler. Jamais de suggestions génériques.
 `;
 
     // Standardize and compile chat history

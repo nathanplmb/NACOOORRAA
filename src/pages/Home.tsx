@@ -3,6 +3,7 @@ import { dbStore } from "../dbStore";
 import { CandidateProfile, Opportunity, CalendarEvent, Contact } from "../types";
 import { Badge, GlassButton } from "../components/Shared";
 import { useLanguage } from "../context/LanguageContext";
+import { useAuth } from "../context/AuthContext";
 import { 
   generateLocalDailyBrief, 
   DailyBriefData, 
@@ -29,10 +30,9 @@ interface HomeProps {
   showToast: (message: string, type: "success" | "error" | "info" | "ai") => void;
 }
 
-const STORAGE_KEY = "nacora_daily_brief";
-
 export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
   const { language, t } = useLanguage();
+  const { currentUser } = useAuth();
   const [profile, setProfile] = useState<CandidateProfile>(dbStore.getProfile());
   const [opportunities, setOpportunities] = useState<Opportunity[]>(dbStore.getOpportunities());
   const [events, setEvents] = useState<CalendarEvent[]>(dbStore.getCalendarEvents());
@@ -42,7 +42,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
   const [isRegenerating, setIsRegenerating] = useState<boolean>(false);
   const [challengeAnswered, setChallengeAnswered] = useState<boolean | null>(null);
 
-  // Load initial store data and brief from cache/generator
+  // Synchronize store data and user-specific daily brief whenever current user changes
   useEffect(() => {
     const p = dbStore.getProfile();
     const o = dbStore.getOpportunities();
@@ -54,28 +54,20 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
     setEvents(e);
     setContacts(c);
 
-    // Check cached brief in localStorage
-    let loadedBrief = false;
-    if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
-      try {
-        const cached = localStorage.getItem(STORAGE_KEY);
-        if (cached) {
-          setBriefData(JSON.parse(cached));
-          loadedBrief = true;
-        }
-      } catch (err) {
-        console.warn("Erreur de lecture du Daily Brief en cache:", err);
-      }
-    }
-
-    if (!loadedBrief) {
-      const initial = generateLocalDailyBrief({ profile: p, opportunities: o, contacts: c, calendarEvents: e });
+    // Retrieve active user's daily brief from dbStore
+    const existingBrief = dbStore.getDailyBrief();
+    if (existingBrief) {
+      setBriefData(existingBrief);
+    } else {
+      // Compute a tailored daily brief strictly for the active user
+      const initial = generateLocalDailyBrief({
+        profile: p,
+        opportunities: o,
+        contacts: c,
+        calendarEvents: e
+      });
+      dbStore.setDailyBrief(initial);
       setBriefData(initial);
-      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
-        } catch (_) {}
-      }
     }
 
     const unsub = dbStore.subscribe(() => {
@@ -83,9 +75,15 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
       setOpportunities(dbStore.getOpportunities());
       setEvents(dbStore.getCalendarEvents());
       setContacts(dbStore.getContacts());
+
+      const updatedBrief = dbStore.getDailyBrief();
+      if (updatedBrief) {
+        setBriefData(updatedBrief);
+      }
     });
+
     return unsub;
-  }, []);
+  }, [currentUser?.uid]);
 
   // Regenerate brief on-demand via Server API (or local fallback)
   const handleRegenerateBrief = async () => {
@@ -112,12 +110,8 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
 
       const data: DailyBriefData = await response.json();
       if (data && data.summaryText && Array.isArray(data.actions)) {
+        dbStore.setDailyBrief(data);
         setBriefData(data);
-        if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-          } catch (_) {}
-        }
         showToast(language === "en" ? "Your daily overview has been successfully refreshed!" : "Votre synthèse a été mise à jour avec succès !", "success");
       } else {
         throw new Error("Invalid structure returned");
@@ -125,12 +119,8 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, showToast }) => {
     } catch (err) {
       console.warn("[Home] Fallback local lors de la régénération du brief:", err);
       const fallback = generateLocalDailyBrief(payload);
+      dbStore.setDailyBrief(fallback);
       setBriefData(fallback);
-      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
-        } catch (_) {}
-      }
       showToast(language === "en" ? "Summary updated from your recent data." : "Synthèse mise à jour à partir de vos données récentes.", "info");
     } finally {
       setIsRegenerating(false);

@@ -19,6 +19,7 @@ import {
 import { JobExtractionModal } from "../components/JobExtractionModal";
 import { NetworkingMessageGenerator } from "../components/network/NetworkingMessageGenerator";
 import { computeOpportunityMatch } from "../api/cvFramework";
+import { resolveContact } from "../utils/contactResolver";
 import { 
   Plus, 
   Upload, 
@@ -68,12 +69,49 @@ import {
   X
 } from "lucide-react";
 
+// Helper to map any status to one of the 4 main pipeline categories or archived/refused
+export const getPipelineCategory = (status?: OpportunityStatus | string): 'to_explore' | 'to_prepare' | 'applied' | 'in_process' | 'archived_refused' => {
+  switch (status) {
+    case 'to_explore':
+    case 'saved':
+    case 'to_study':
+      return 'to_explore';
+    case 'to_prepare':
+    case 'to_apply':
+      return 'to_prepare';
+    case 'applied':
+    case 'candidated':
+      return 'applied';
+    case 'in_process':
+    case 'interview_1':
+    case 'interview_2':
+    case 'interview_3':
+    case 'interview':
+    case 'proposal':
+      return 'in_process';
+    case 'refused':
+    case 'archived':
+      return 'archived_refused';
+    default:
+      return 'to_explore';
+  }
+};
+
 interface OpportunitiesProps {
   showToast: (message: string, type: "success" | "error" | "info" | "ai") => void;
   searchTerm: string;
+  onOpenContact?: (contactId: string) => void;
+  initialSelectedOppId?: string | null;
+  onClearInitialOpp?: () => void;
 }
 
-export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchTerm }) => {
+export const Opportunities: React.FC<OpportunitiesProps> = ({ 
+  showToast, 
+  searchTerm, 
+  onOpenContact,
+  initialSelectedOppId,
+  onClearInitialOpp
+}) => {
   const { language, t } = useLanguage();
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [selectedOpp, setSelectedOpp] = useState<Opportunity | null>(null);
@@ -88,6 +126,16 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
   const [reExtractOpp, setReExtractOpp] = useState<Opportunity | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
 
+  // Contact association state
+  const [isAssociateModalOpen, setIsAssociateModalOpen] = useState(false);
+  const [associateSearch, setAssociateSearch] = useState("");
+  const [isQuickAddModalOpen, setIsQuickAddModalOpen] = useState(false);
+  const [quickContactName, setQuickContactName] = useState("");
+  const [quickContactRole, setQuickContactRole] = useState("");
+  const [quickContactEmail, setQuickContactEmail] = useState("");
+  const [quickContactPhone, setQuickContactPhone] = useState("");
+  const [quickContactLinkedin, setQuickContactLinkedin] = useState("");
+
   // Form State for creating a new opportunity
   const [formTitle, setFormTitle] = useState("");
   const [formCompany, setFormCompany] = useState("");
@@ -98,6 +146,11 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
   const [formUrl, setFormUrl] = useState("");
   const [formNotes, setFormNotes] = useState("");
   const [formStatus, setFormStatus] = useState<OpportunityStatus>("to_apply");
+  const [formRecruiterName, setFormRecruiterName] = useState("");
+  const [formRecruiterRole, setFormRecruiterRole] = useState("");
+  const [formRecruiterEmail, setFormRecruiterEmail] = useState("");
+  const [formRecruiterPhone, setFormRecruiterPhone] = useState("");
+  const [formRecruiterLinkedin, setFormRecruiterLinkedin] = useState("");
   const [rawJobText, setRawJobText] = useState(""); // For Gemini extraction
 
   // Edit Form State
@@ -111,6 +164,11 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
   const [editDeadline, setEditDeadline] = useState("");
   const [editUrl, setEditUrl] = useState("");
   const [editStatus, setEditStatus] = useState<OpportunityStatus>("saved");
+  const [editRecruiterName, setEditRecruiterName] = useState("");
+  const [editRecruiterRole, setEditRecruiterRole] = useState("");
+  const [editRecruiterEmail, setEditRecruiterEmail] = useState("");
+  const [editRecruiterPhone, setEditRecruiterPhone] = useState("");
+  const [editRecruiterLinkedin, setEditRecruiterLinkedin] = useState("");
 
   // Private note live editor state
   const [privateNoteText, setPrivateNoteText] = useState("");
@@ -157,6 +215,130 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
     return unsub;
   }, [selectedOpp?.id]);
 
+  useEffect(() => {
+    if (initialSelectedOppId && opportunities.length > 0) {
+      const match = opportunities.find(o => o.id === initialSelectedOppId);
+      if (match) {
+        setSelectedOpp(match);
+        if (onClearInitialOpp) onClearInitialOpp();
+      }
+    }
+  }, [initialSelectedOppId, opportunities, onClearInitialOpp]);
+
+  const getStatusLabelAndStyle = (status?: string) => {
+    switch (status) {
+      case "a_contacter":
+      case "to_contact":
+        return { label: "À contacter", style: "bg-amber-500/15 text-amber-300 border-amber-500/30" };
+      case "demande_envoyee":
+      case "contacted":
+        return { label: "Demande envoyée", style: "bg-sky-500/15 text-sky-300 border-sky-500/30" };
+      case "connexion_acceptee":
+        return { label: "Connexion acceptée", style: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" };
+      case "message_envoye":
+        return { label: "Message envoyé", style: "bg-blue-500/15 text-blue-300 border-blue-500/30" };
+      case "en_attente_reponse":
+        return { label: "En attente de réponse", style: "bg-purple-500/15 text-purple-300 border-purple-500/30" };
+      case "reponse_recue":
+      case "reponse_a_traiter":
+        return { label: "Réponse reçue", style: "bg-rose-500/15 text-rose-300 border-rose-500/30" };
+      case "echange_en_cours":
+      case "exchanging":
+        return { label: "Échange en cours", style: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30" };
+      case "appel_prevu":
+        return { label: "Appel prévu", style: "bg-teal-500/15 text-teal-300 border-teal-500/30" };
+      case "echange_realise":
+      case "interview_done":
+        return { label: "Échange réalisé", style: "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" };
+      default:
+        return { label: "Nouveau contact", style: "bg-white/10 text-slate-300 border-white/15" };
+    }
+  };
+
+  const getOppAssociatedContacts = (opp: Opportunity): Contact[] => {
+    const all = dbStore.getContacts();
+    const cMap = new Map<string, Contact>();
+
+    if (opp.contactIds && Array.isArray(opp.contactIds)) {
+      opp.contactIds.forEach(id => {
+        const found = all.find(c => c.id === id);
+        if (found) cMap.set(found.id, found);
+      });
+    }
+
+    if (opp.recruiterContact) {
+      const recId = opp.recruiterContact.contactId || opp.recruiterContact.id;
+      if (recId) {
+        const found = all.find(c => c.id === recId);
+        if (found) cMap.set(found.id, found);
+      }
+    }
+
+    all.forEach(c => {
+      if (c.opportunityId === opp.id || (c.opportunityIds && c.opportunityIds.includes(opp.id))) {
+        cMap.set(c.id, c);
+      }
+    });
+
+    return Array.from(cMap.values());
+  };
+
+  const handleAssociateContact = (contactId: string) => {
+    if (!selectedOpp) return;
+    dbStore.associateContactWithOpportunity(selectedOpp.id, contactId);
+    showToast("Contact associé à l'opportunité avec succès", "success");
+    setIsAssociateModalOpen(false);
+  };
+
+  const handleDisassociateContact = (contactId: string) => {
+    if (!selectedOpp) return;
+    dbStore.disassociateContactFromOpportunity(selectedOpp.id, contactId);
+    showToast("Association retirée de l'opportunité", "info");
+  };
+
+  const handleQuickCreateContact = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedOpp || !quickContactName.trim()) return;
+
+    try {
+      const nameParts = quickContactName.trim().split(" ");
+      const firstName = nameParts[0] || "";
+      const lastName = nameParts.slice(1).join(" ") || "";
+
+      const newContact = dbStore.addContact({
+        fullName: quickContactName.trim(),
+        firstName,
+        lastName,
+        companyId: selectedOpp.companyId || "",
+        companyName: selectedOpp.companyName,
+        jobTitle: quickContactRole.trim() || "Recruteur / Interlocuteur",
+        normalizedJobTitle: quickContactRole.trim() || "Recruteur / Interlocuteur",
+        category: "recruiter",
+        relevanceScore: 85,
+        connectionPoints: [`Associé à l'opportunité "${selectedOpp.title}"`],
+        previousCompanies: [],
+        notes: `Créé directement depuis la fiche de l'opportunité "${selectedOpp.title}".`,
+        email: quickContactEmail.trim() || undefined,
+        phone: quickContactPhone.trim() || undefined,
+        linkedInUrl: quickContactLinkedin.trim() || undefined,
+        opportunityId: selectedOpp.id,
+        opportunityTitle: selectedOpp.title
+      });
+
+      dbStore.associateContactWithOpportunity(selectedOpp.id, newContact.id);
+      showToast(`Contact "${newContact.fullName}" créé et associé`, "success");
+
+      setQuickContactName("");
+      setQuickContactRole("");
+      setQuickContactEmail("");
+      setQuickContactPhone("");
+      setQuickContactLinkedin("");
+      setIsQuickAddModalOpen(false);
+    } catch (err: any) {
+      showToast(err?.message || "Erreur lors de la création du contact", "error");
+    }
+  };
+
   // Open edit modal pre-filled
   const handleOpenEditModal = (opp: Opportunity) => {
     setEditTitle(opp.title);
@@ -169,12 +351,28 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
     setEditDeadline(opp.deadline || "");
     setEditUrl(opp.url || "");
     setEditStatus(opp.status);
+    setEditRecruiterName(opp.recruiterContact?.name || "");
+    setEditRecruiterRole(opp.recruiterContact?.role || "");
+    setEditRecruiterEmail(opp.recruiterContact?.email || "");
+    setEditRecruiterPhone(opp.recruiterContact?.phone || "");
+    setEditRecruiterLinkedin(opp.recruiterContact?.linkedinUrl || opp.recruiterContact?.linkedin || "");
     setIsEditModalOpen(true);
   };
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedOpp) return;
+
+    const recruiterContact = (editRecruiterName || editRecruiterEmail || editRecruiterLinkedin) ? {
+      ...(selectedOpp.recruiterContact || {}),
+      name: editRecruiterName || undefined,
+      role: editRecruiterRole || undefined,
+      email: editRecruiterEmail || undefined,
+      phone: editRecruiterPhone || undefined,
+      linkedinUrl: editRecruiterLinkedin || undefined,
+      linkedin: editRecruiterLinkedin || undefined
+    } : selectedOpp.recruiterContact;
+
     const updated: Opportunity = {
       ...selectedOpp,
       title: editTitle,
@@ -186,12 +384,18 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
       startDate: editStartDate || undefined,
       deadline: editDeadline || undefined,
       url: editUrl || undefined,
-      status: editStatus
+      status: editStatus,
+      recruiterContact
     };
-    dbStore.updateOpportunity(updated);
-    setSelectedOpp(updated);
-    setIsEditModalOpen(false);
-    showToast("Opportunité mise à jour avec succès", "success");
+
+    try {
+      dbStore.updateOpportunity(updated);
+      setSelectedOpp(updated);
+      setIsEditModalOpen(false);
+      showToast("Opportunité et contact recruteur mis à jour et synchronisés !", "success");
+    } catch (err: any) {
+      showToast(`Erreur d'enregistrement : ${err?.message || "Échec de la sauvegarde"}`, "error");
+    }
   };
 
   const handleSavePrivateNote = () => {
@@ -205,6 +409,9 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
     setIsEditingPrivateNote(false);
     showToast("Notes privées enregistrées", "success");
   };
+
+  // State for showing archived/refused offers filter
+  const [showArchived, setShowArchived] = useState<boolean>(false);
 
   // Filter opportunities based on search term, contract filter and late filter
   const filteredOpps = opportunities.filter(o => {
@@ -224,12 +431,18 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
       (o.workflowStep && o.workflowStep >= 4 && o.workflowStep <= 5)
     ) : true;
 
+    // Archived / Refused handling
+    const category = getPipelineCategory(o.status);
+    if (!showArchived && category === "archived_refused") {
+      return false;
+    }
+
     return matchesSearch && matchesContract && isLate;
   });
 
-  // Kanban Columns in strict order: Sauvegardée -> À préparer -> À étudier -> À candidater
+  // Kanban Columns in strict order: À explorer -> À préparer -> Candidaté -> En cours
   const columns: Array<{ 
-    id: OpportunityStatus; 
+    id: 'to_explore' | 'to_prepare' | 'applied' | 'in_process'; 
     title: string; 
     color: string; 
     badgeBg: string;
@@ -237,36 +450,36 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
     desc: string; 
   }> = [
     { 
-      id: "saved", 
-      title: t.opportunities.saved, 
+      id: "to_explore", 
+      title: "À explorer", 
       color: "text-sky-400", 
       badgeBg: "bg-sky-500/15 text-sky-300 border border-sky-500/30",
       borderActive: "border-sky-400/60 bg-sky-500/[0.04]",
-      desc: language === "en" ? "Tracked & shortlisted offers" : "Offres repérées et mises de côté" 
+      desc: language === "en" ? "Tracked & shortlisted offers" : "Offres repérées & à analyser" 
     },
     { 
       id: "to_prepare", 
-      title: t.opportunities.toPrepare, 
+      title: "À préparer", 
       color: "text-purple-400", 
       badgeBg: "bg-purple-500/15 text-purple-300 border border-purple-500/30",
       borderActive: "border-purple-400/60 bg-purple-500/[0.04]",
       desc: language === "en" ? "Application & CV in preparation" : "Dossier & CV en préparation" 
     },
     { 
-      id: "to_study", 
-      title: t.opportunities.toStudy, 
-      color: "text-amber-400", 
-      badgeBg: "bg-amber-500/15 text-amber-300 border border-amber-500/30",
-      borderActive: "border-amber-400/60 bg-amber-500/[0.04]",
-      desc: language === "en" ? "Fit & requirement analysis" : "Analyse d'adéquation en cours" 
-    },
-    { 
-      id: "to_apply", 
-      title: t.opportunities.toApply, 
+      id: "applied", 
+      title: "Candidaté", 
       color: "text-emerald-400", 
       badgeBg: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30",
       borderActive: "border-emerald-400/60 bg-emerald-500/[0.04]",
-      desc: language === "en" ? "Ready to submit application" : "Prêt pour envoi de candidature" 
+      desc: language === "en" ? "Submitted applications" : "Candidatures transmises" 
+    },
+    { 
+      id: "in_process", 
+      title: "En cours", 
+      color: "text-amber-400", 
+      badgeBg: "bg-amber-500/15 text-amber-300 border border-amber-500/30",
+      borderActive: "border-amber-400/60 bg-amber-500/[0.04]",
+      desc: language === "en" ? "Interviews, tests & proposals" : "Entretiens, tests & propositions" 
     }
   ];
 
@@ -301,30 +514,37 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
     const oppId = e.dataTransfer.getData("text/plain") || draggedOppId;
     if (!oppId) return;
     const opp = opportunities.find(o => o.id === oppId);
-    if (opp && opp.status !== colId) {
-      handleMoveOpportunity(opp, colId);
+    if (opp && getPipelineCategory(opp.status) !== colId) {
+      handleMoveOpportunity(opp, colId as any);
     }
     setDraggedOppId(null);
     setDragOverCol(null);
   };
 
-  // Quick move sequence
-  const columnSequence: OpportunityStatus[] = ["saved", "to_prepare", "to_study", "to_apply"];
+  // Drag and drop or quick move controls with intelligent workflow step synchronization
+  const handleMoveOpportunity = (opp: Opportunity, targetCol: 'to_explore' | 'to_prepare' | 'applied' | 'in_process') => {
+    let newStep = opp.workflowStep || 1;
 
-  const handleShift = (opp: Opportunity, direction: "prev" | "next") => {
-    const currentIndex = columnSequence.indexOf(opp.status);
-    const newIndex = direction === "prev" ? currentIndex - 1 : currentIndex + 1;
-    if (newIndex >= 0 && newIndex < columnSequence.length) {
-      handleMoveOpportunity(opp, columnSequence[newIndex]);
+    // Bi-directional step adjustments
+    if (targetCol === 'to_explore') {
+      if (newStep > 2) newStep = 1;
+    } else if (targetCol === 'to_prepare') {
+      if (newStep < 3 || newStep > 4) newStep = 3;
+    } else if (targetCol === 'applied') {
+      if (newStep < 5 || newStep > 6) newStep = 5;
+    } else if (targetCol === 'in_process') {
+      if (newStep < 7) newStep = 7;
     }
-  };
 
-  // Drag and drop or quick move controls
-  const handleMoveOpportunity = (opp: Opportunity, newStatus: OpportunityStatus) => {
-    const updated = { ...opp, status: newStatus };
+    const updated: Opportunity = { 
+      ...opp, 
+      status: targetCol,
+      workflowStep: newStep
+    };
+
     dbStore.updateOpportunity(updated);
-    const colName = columns.find(c => c.id === newStatus)?.title || newStatus;
-    showToast(`"${opp.title}" transférée vers "${colName}"`, "success");
+    const colName = columns.find(c => c.id === targetCol)?.title || targetCol;
+    showToast(`"${opp.title}" transférée vers "${colName}" (Étape ${newStep}/9)`, "success");
     if (selectedOpp?.id === opp.id) {
       setSelectedOpp(updated);
     }
@@ -462,38 +682,58 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
       return;
     }
 
-    const linkedCompany = dbStore.getCompanyByNameOrCreate(formCompany);
-    const lastExtracted: ExtractedJobInfo | undefined = (window as any)._lastExtractedInfo;
+    try {
+      const linkedCompany = dbStore.getCompanyByNameOrCreate(formCompany);
+      const lastExtracted: ExtractedJobInfo | undefined = (window as any)._lastExtractedInfo;
 
-    const newOpp = dbStore.addOpportunity({
-      companyId: linkedCompany.id,
-      companyName: linkedCompany.name,
-      title: formTitle,
-      contractType: formContract,
-      duration: formDuration,
-      location: formLocation || "Clermont-Ferrand",
-      status: formStatus,
-      salary: formSalary || undefined,
-      url: formUrl || undefined,
-      notes: formNotes || "Nouvelle offre ajoutée.",
-      aiExtracted: !!lastExtracted,
-      extractedInfo: lastExtracted
-    });
+      const recruiterContact = (formRecruiterName || formRecruiterEmail || formRecruiterLinkedin) ? {
+        name: formRecruiterName || undefined,
+        role: formRecruiterRole || undefined,
+        email: formRecruiterEmail || undefined,
+        phone: formRecruiterPhone || undefined,
+        linkedinUrl: formRecruiterLinkedin || undefined,
+        linkedin: formRecruiterLinkedin || undefined
+      } : undefined;
 
-    showToast(`"${formTitle}" ajouté à la colonne ${columns.find(c => c.id === formStatus)?.title}`, "success");
-    
-    // Clear Form
-    setFormTitle("");
-    setFormCompany("");
-    setFormContract("Apprentissage");
-    setFormDuration("12 mois");
-    setFormLocation("");
-    setFormSalary("");
-    setFormUrl("");
-    setFormNotes("");
-    setRawJobText("");
-    (window as any)._lastExtractedInfo = undefined;
-    setIsAddModalOpen(false);
+      const newOpp = dbStore.addOpportunity({
+        companyId: linkedCompany.id,
+        companyName: linkedCompany.name,
+        title: formTitle,
+        contractType: formContract,
+        duration: formDuration,
+        location: formLocation || "Clermont-Ferrand",
+        status: formStatus,
+        salary: formSalary || undefined,
+        url: formUrl || undefined,
+        notes: formNotes || "Nouvelle offre ajoutée.",
+        aiExtracted: !!lastExtracted,
+        extractedInfo: lastExtracted,
+        recruiterContact
+      });
+
+      const colTitle = columns.find(c => c.id === formStatus)?.title || formStatus;
+      showToast(`"${formTitle}" ajouté à la colonne "${colTitle}" et contact synchronisé !`, "success");
+
+      // Clear Form
+      setFormTitle("");
+      setFormCompany("");
+      setFormContract("Apprentissage");
+      setFormDuration("12 mois");
+      setFormLocation("");
+      setFormSalary("");
+      setFormUrl("");
+      setFormNotes("");
+      setFormRecruiterName("");
+      setFormRecruiterRole("");
+      setFormRecruiterEmail("");
+      setFormRecruiterPhone("");
+      setFormRecruiterLinkedin("");
+      setRawJobText("");
+      (window as any)._lastExtractedInfo = undefined;
+      setIsAddModalOpen(false);
+    } catch (err: any) {
+      showToast(`Erreur lors de la création : ${err?.message || "Échec de l'enregistrement"}`, "error");
+    }
   };
 
   // Delete Opportunity
@@ -688,6 +928,19 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
             )}
           </button>
 
+          {/* Filter Refusées / Archivées Toggle */}
+          <button
+            onClick={() => setShowArchived(!showArchived)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-spring cursor-pointer border ${
+              showArchived
+                ? "bg-slate-800 text-slate-100 border-slate-600 shadow-sm"
+                : "bg-white/5 text-[#9AA0B2] hover:text-[#F5F6FA] border-white/10 hover:bg-white/10"
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 text-[#9AA0B2]" />
+            <span>Refusées / Archivées</span>
+          </button>
+
           {/* Total Counter badge */}
           <span className="text-[11px] text-[#9AA0B2] font-semibold px-2.5 py-1 glass-pill bg-white/[0.04]">
             {filteredOpps.length} / {opportunities.length} {language === "en" ? "opportunities" : "offres"}
@@ -698,7 +951,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
       {/* Kanban Board Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
         {columns.map(col => {
-          const colOpps = filteredOpps.filter(o => o.status === col.id);
+          const colOpps = filteredOpps.filter(o => getPipelineCategory(o.status) === col.id);
           const isOver = dragOverCol === col.id;
 
           return (
@@ -850,7 +1103,7 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                           onClick={(e) => e.stopPropagation()}
                         >
                           {columns
-                            .filter((c) => c.id !== opp.status)
+                            .filter((c) => c.id !== getPipelineCategory(opp.status))
                             .map((c) => (
                               <button
                                 key={c.id}
@@ -872,6 +1125,67 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
           );
         })}
       </div>
+
+      {/* Refusées & Archivées dedicated section */}
+      {showArchived && (
+        <div className="mt-6 p-5 glass-panel rounded-2xl border border-slate-700/50 space-y-4 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between pb-3 border-b border-white/10">
+            <div className="flex items-center gap-2">
+              <Layers className="w-4 h-4 text-slate-400" />
+              <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                Offres Refusées & Archivées
+              </h3>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                {opportunities.filter(o => getPipelineCategory(o.status) === "archived_refused").length}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowArchived(false)}
+              className="text-xs text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Masquer</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {opportunities.filter(o => getPipelineCategory(o.status) === "archived_refused").length === 0 ? (
+              <p className="text-xs text-slate-500 italic py-4 col-span-3 text-center">
+                Aucune candidature refusée ou archivée.
+              </p>
+            ) : (
+              opportunities.filter(o => getPipelineCategory(o.status) === "archived_refused").map(opp => (
+                <div key={opp.id} className="p-3.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between gap-3">
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="font-bold text-[#FF6685]">{opp.companyName}</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${opp.status === 'refused' ? 'bg-red-500/20 text-red-300 border border-red-500/30' : 'bg-slate-700 text-slate-300'}`}>
+                        {opp.status === 'refused' ? 'Refusée' : 'Archivée'}
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold text-slate-200 leading-snug">{opp.title}</h4>
+                    <p className="text-[11px] text-slate-400 mt-1">{opp.location} • {opp.contractType}</p>
+                  </div>
+                  <div className="flex items-center gap-2 pt-2 border-t border-white/5">
+                    <button
+                      onClick={() => handleMoveOpportunity(opp, 'to_explore')}
+                      className="px-2.5 py-1 rounded-lg bg-sky-500/15 text-sky-300 border border-sky-500/30 text-[11px] font-semibold hover:bg-sky-500/25 transition-colors cursor-pointer"
+                    >
+                      Restaurer vers À explorer
+                    </button>
+                    <button
+                      onClick={() => handleMoveOpportunity(opp, 'to_prepare')}
+                      className="px-2.5 py-1 rounded-lg bg-purple-500/15 text-purple-300 border border-purple-500/30 text-[11px] font-semibold hover:bg-purple-500/25 transition-colors cursor-pointer"
+                    >
+                      Restaurer vers À préparer
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
       </>
       )}
 
@@ -1011,17 +1325,61 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs text-slate-300 font-semibold">Étape initiale Kanban</label>
+                  <label className="text-xs text-slate-300 font-semibold">Catégorie initiale du Pipeline</label>
                   <select
                     value={formStatus}
                     onChange={(e) => setFormStatus(e.target.value as any)}
                     className="bg-[#0b0f19] border border-white/10 rounded-xl px-3 py-2 text-sm focus:outline-none"
                   >
-                    <option value="saved">Sauvegardée</option>
-                    <option value="to_study">À étudier</option>
+                    <option value="to_explore">À explorer</option>
                     <option value="to_prepare">À préparer</option>
-                    <option value="to_apply">À candidater</option>
+                    <option value="applied">Candidaté</option>
+                    <option value="in_process">En cours (Entretiens / Tests)</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="border-t border-white/10 pt-3.5 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[#FF6685]" />
+                  <span className="text-xs font-bold text-white uppercase tracking-wider">Contact / Recruteur associé (synchronisé avec « Contacts »)</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    placeholder="Nom complet (ex: Valérie Bertrand)"
+                    value={formRecruiterName}
+                    onChange={(e) => setFormRecruiterName(e.target.value)}
+                    className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Poste / Rôle (ex: Responsable Recrutement RH)"
+                    value={formRecruiterRole}
+                    onChange={(e) => setFormRecruiterRole(e.target.value)}
+                    className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25"
+                  />
+                  <input
+                    type="email"
+                    placeholder="E-mail (ex: valerie.bertrand@entreprise.com)"
+                    value={formRecruiterEmail}
+                    onChange={(e) => setFormRecruiterEmail(e.target.value)}
+                    className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Téléphone (ex: 06 12 34 56 78)"
+                    value={formRecruiterPhone}
+                    onChange={(e) => setFormRecruiterPhone(e.target.value)}
+                    className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25"
+                  />
+                  <input
+                    type="url"
+                    placeholder="Profil LinkedIn (ex: https://linkedin.com/in/...)"
+                    value={formRecruiterLinkedin}
+                    onChange={(e) => setFormRecruiterLinkedin(e.target.value)}
+                    className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25 col-span-1 sm:col-span-2"
+                  />
                 </div>
               </div>
 
@@ -1231,17 +1589,63 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
             </div>
 
             <div className="flex flex-col gap-1.5 col-span-1 sm:col-span-2">
-              <label className="text-xs text-slate-300 font-semibold">Statut Kanban</label>
+              <label className="text-xs text-slate-300 font-semibold">Statut Pipeline & Suivi</label>
               <select
                 value={editStatus}
                 onChange={(e) => setEditStatus(e.target.value as OpportunityStatus)}
                 className="bg-[#0b0f19] border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none"
               >
-                <option value="saved">Sauvegardée</option>
+                <option value="to_explore">À explorer</option>
                 <option value="to_prepare">À préparer</option>
-                <option value="to_study">À étudier</option>
-                <option value="to_apply">À candidater</option>
+                <option value="applied">Candidaté</option>
+                <option value="in_process">En cours (Entretiens / Tests / Négociation)</option>
+                <option value="refused">Refusée</option>
+                <option value="archived">Archivée</option>
               </select>
+            </div>
+
+            <div className="border-t border-white/10 pt-3.5 space-y-2.5 col-span-1 sm:col-span-2">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-[#FF6685]" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">Contact / Recruteur associé (synchronisé avec « Contacts »)</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  placeholder="Nom complet (ex: Valérie Bertrand)"
+                  value={editRecruiterName}
+                  onChange={(e) => setEditRecruiterName(e.target.value)}
+                  className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25"
+                />
+                <input
+                  type="text"
+                  placeholder="Poste / Rôle (ex: Responsable Recrutement RH)"
+                  value={editRecruiterRole}
+                  onChange={(e) => setEditRecruiterRole(e.target.value)}
+                  className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25"
+                />
+                <input
+                  type="email"
+                  placeholder="E-mail (ex: valerie.bertrand@entreprise.com)"
+                  value={editRecruiterEmail}
+                  onChange={(e) => setEditRecruiterEmail(e.target.value)}
+                  className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25"
+                />
+                <input
+                  type="text"
+                  placeholder="Téléphone (ex: 06 12 34 56 78)"
+                  value={editRecruiterPhone}
+                  onChange={(e) => setEditRecruiterPhone(e.target.value)}
+                  className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25"
+                />
+                <input
+                  type="url"
+                  placeholder="Profil LinkedIn (ex: https://linkedin.com/in/...)"
+                  value={editRecruiterLinkedin}
+                  onChange={(e) => setEditRecruiterLinkedin(e.target.value)}
+                  className="bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-white/25 col-span-1 sm:col-span-2"
+                />
+              </div>
             </div>
           </div>
 
@@ -1536,61 +1940,139 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                     {/* Right 1 Col: Contact RH & Avantages */}
                     <div className="space-y-6">
                       
-                      {/* Contact RH & Recruteur */}
-                      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                            <UserCheck className="w-4 h-4 text-emerald-400" />
-                            Contact RH & Recruteur
-                          </h4>
-                        </div>
+                      {/* Contacts Associés */}
+                      {(() => {
+                        const associatedContacts = getOppAssociatedContacts(selectedOpp);
 
-                        {selectedOpp.recruiterContact ? (
-                          <div className="p-3.5 rounded-xl bg-black/20 border border-white/5 space-y-2.5">
-                            <div>
-                              <div className="text-sm font-bold text-white">{selectedOpp.recruiterContact.name}</div>
-                              <div className="text-xs text-slate-400">{selectedOpp.recruiterContact.role}</div>
-                            </div>
-                            
-                            <div className="space-y-1.5 pt-1 text-xs">
-                              {selectedOpp.recruiterContact.email && (
-                                <a 
-                                  href={`mailto:${selectedOpp.recruiterContact.email}`}
-                                  className="flex items-center gap-2 text-rose-300 hover:text-rose-200 transition-colors"
+                        return (
+                          <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-4">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                                <Users className="w-4 h-4 text-[#FF6685]" />
+                                Contacts associés ({associatedContacts.length})
+                              </h4>
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setIsAssociateModalOpen(true)}
+                                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#F5F6FA] border border-white/10 flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="Associer un contact existant"
                                 >
-                                  <Mail className="w-3.5 h-3.5 text-slate-400" />
-                                  <span className="truncate">{selectedOpp.recruiterContact.email}</span>
-                                </a>
-                              )}
-                              {selectedOpp.recruiterContact.phone && (
-                                <div className="flex items-center gap-2 text-slate-300">
-                                  <Phone className="w-3.5 h-3.5 text-slate-400" />
-                                  <span>{selectedOpp.recruiterContact.phone}</span>
+                                  <Plus className="w-3 h-3 text-[#FF6685]" />
+                                  <span>Lier</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setIsQuickAddModalOpen(true)}
+                                  className="px-2.5 py-1 rounded-lg bg-[#D81A45]/15 hover:bg-[#D81A45]/25 text-xs text-[#FF6685] border border-[#D81A45]/30 flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="Créer un nouveau contact"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>Créer</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {associatedContacts.length > 0 ? (
+                              <div className="space-y-3">
+                                {associatedContacts.map(c => {
+                                  const statusInfo = getStatusLabelAndStyle(c.networkingStatus);
+
+                                  return (
+                                    <div key={c.id} className="p-3.5 rounded-xl bg-black/30 border border-white/10 space-y-3">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                          <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[#D81A45]/30 to-purple-500/20 text-[#FF6685] border border-white/10 flex items-center justify-center font-bold text-xs shrink-0">
+                                            {c.fullName.slice(0, 2).toUpperCase()}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <div className="text-xs font-bold text-white truncate">{c.fullName}</div>
+                                            <div className="text-[11px] text-[#9AA0B2] truncate">{c.jobTitle} {c.companyName ? `• ${c.companyName}` : ''}</div>
+                                          </div>
+                                        </div>
+
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${statusInfo.style}`}>
+                                          {statusInfo.label}
+                                        </span>
+                                      </div>
+
+                                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5 text-[11px]">
+                                        <div className="flex items-center gap-2 text-[#9AA0B2] truncate">
+                                          {c.email && (
+                                            <a href={`mailto:${c.email}`} className="hover:text-rose-300 transition-colors flex items-center gap-1 truncate" title={c.email}>
+                                              <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                                              <span className="truncate max-w-[120px]">{c.email}</span>
+                                            </a>
+                                          )}
+                                          {c.phone && (
+                                            <span className="flex items-center gap-1">
+                                              <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                                              <span>{c.phone}</span>
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDisassociateContact(c.id)}
+                                            className="p-1 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                                            title="Retirer l'association avec cette opportunité"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (onOpenContact) {
+                                                onOpenContact(c.id);
+                                              } else {
+                                                showToast(`Fiche contact : ${c.fullName}`, "info");
+                                              }
+                                            }}
+                                            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[#F5F6FA] hover:text-white border border-white/15 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                            title="Ouvrir la fiche contact complète dans l'annuaire Contacts"
+                                          >
+                                            <span>Ouvrir la fiche</span>
+                                            <ChevronRight className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="p-4 rounded-xl bg-black/20 border border-white/5 text-xs text-slate-400 space-y-2 text-center py-5">
+                                <Users className="w-6 h-6 text-slate-500 mx-auto" />
+                                <p className="font-medium text-slate-300">Aucun contact associé</p>
+                                <p className="text-[11px] text-slate-500">
+                                  Liez un contact de votre base de données ou créez-en un directement pour cette opportunité.
+                                </p>
+                                <div className="flex items-center justify-center gap-2 pt-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsAssociateModalOpen(true)}
+                                    className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-xs text-[#F5F6FA] border border-white/10 font-semibold cursor-pointer"
+                                  >
+                                    Lier un contact existant
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsQuickAddModalOpen(true)}
+                                    className="px-3 py-1.5 rounded-xl bg-[#D81A45]/20 hover:bg-[#D81A45]/30 text-xs text-[#FF6685] border border-[#D81A45]/40 font-semibold cursor-pointer"
+                                  >
+                                    Créer un contact
+                                  </button>
                                 </div>
-                              )}
-                              {(selectedOpp.recruiterContact.linkedinUrl || selectedOpp.recruiterContact.linkedin) && (
-                                <a 
-                                  href={selectedOpp.recruiterContact.linkedinUrl || selectedOpp.recruiterContact.linkedin}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="flex items-center gap-2 text-sky-400 hover:text-sky-300 transition-colors"
-                                >
-                                  <Linkedin className="w-3.5 h-3.5" />
-                                  <span>Profil LinkedIn</span>
-                                </a>
-                              )}
-                            </div>
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="p-4 rounded-xl bg-black/20 border border-white/5 text-xs text-slate-400 space-y-2 text-center py-5">
-                            <UserCheck className="w-6 h-6 text-slate-500 mx-auto" />
-                            <p className="font-medium text-slate-300">Aucun contact spécifié</p>
-                            <p className="text-[11px] text-slate-500">
-                              Tu peux identifier des recruteurs ou alumni de cette entreprise dans l'onglet Contacts.
-                            </p>
-                          </div>
-                        )}
-                      </div>
+                        );
+                      })()}
 
                       {/* Avantages & Environnement */}
                       <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5 space-y-3">
@@ -2034,166 +2516,158 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
               {activeTab === "workflow" && (
                 <div className="space-y-6">
                   
-                  {/* Bandeau Étape actuelle du workflow */}
-                  <div className="p-5 rounded-2xl bg-gradient-to-r from-rose-500/10 via-black/40 to-black/40 border border-rose-500/25 space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-[11px] font-bold uppercase tracking-wider text-rose-300">Étape actuelle</span>
-                          <span className="text-slate-600">•</span>
-                          <span className="text-xs text-slate-300">
-                            Étape {selectedOpp.workflowStep || 1} sur 9
-                          </span>
+                  {/* Function to change workflow step with bi-directional pipeline sync */}
+                  {(() => {
+                    const workflowStepsList = [
+                      { step: 1, name: "Découverte & Mise de côté", desc: "Offre repérée, enregistrée ou importée.", category: "À explorer", status: "to_explore" },
+                      { step: 2, name: "Analyse de l'offre & Fit", desc: "Analyse des exigences, culture & adéquation.", category: "À explorer", status: "to_explore" },
+                      { step: 3, name: "Préparation & Personnalisation", desc: "Rédaction LM, adaptation CV & fiche entreprise.", category: "À préparer", status: "to_prepare" },
+                      { step: 4, name: "Relecture & Validation finale", desc: "Vérification des pièces & préparation de l'envoi.", category: "À préparer", status: "to_prepare" },
+                      { step: 5, name: "Candidature envoyée", desc: "Transmission effective de la candidature.", category: "Candidaté", status: "applied" },
+                      { step: 6, name: "Confirmation & Suivi post-envoi", desc: "Accusé de réception & planification de relance.", category: "Candidaté", status: "applied" },
+                      { step: 7, name: "Entretiens & Évaluations", desc: "Entretiens (RH, Opérationnel), tests & cas pratiques.", category: "En cours", status: "in_process" },
+                      { step: 8, name: "Proposition & Négociation", desc: "Offre reçue & négociation de contrat/dates.", category: "En cours", status: "in_process" },
+                      { step: 9, name: "Déclaration & Intégration", desc: "Validation finale, signature & préparation d'arrivée.", category: "En cours", status: "in_process" }
+                    ];
+
+                    const currentStepIdx = (selectedOpp.workflowStep || 1) - 1;
+                    const currentStepConfig = workflowStepsList[currentStepIdx] || workflowStepsList[0];
+
+                    const handleSelectStep = (targetStep: number) => {
+                      let newStatus: OpportunityStatus = selectedOpp.status;
+                      if (targetStep <= 2) newStatus = "to_explore";
+                      else if (targetStep <= 4) newStatus = "to_prepare";
+                      else if (targetStep <= 6) newStatus = "applied";
+                      else newStatus = "in_process";
+
+                      const updated: Opportunity = {
+                        ...selectedOpp,
+                        workflowStep: targetStep,
+                        status: newStatus
+                      };
+
+                      setSelectedOpp(updated);
+                      dbStore.updateOpportunity(updated);
+                      const targetName = workflowStepsList[targetStep - 1]?.name || `Étape ${targetStep}`;
+                      const targetCat = workflowStepsList[targetStep - 1]?.category || "Pipeline";
+                      showToast(`Étape ${targetStep}/9 activée : "${targetName}" (Catégorie : ${targetCat})`, "success");
+                    };
+
+                    return (
+                      <>
+                        {/* Bandeau Étape actuelle du workflow */}
+                        <div className="p-5 rounded-2xl bg-gradient-to-r from-rose-500/10 via-black/40 to-black/40 border border-rose-500/25 space-y-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-rose-300">Étape actuelle</span>
+                                <span className="text-slate-600">•</span>
+                                <span className="text-xs text-slate-300">
+                                  Étape {selectedOpp.workflowStep || 1} sur 9
+                                </span>
+                                <span className="text-slate-600">•</span>
+                                <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-white/10 text-white">
+                                  {currentStepConfig.category}
+                                </span>
+                              </div>
+                              <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+                                <span>{currentStepConfig.name}</span>
+                              </h3>
+                              <p className="text-xs text-slate-400 mt-1">
+                                {currentStepConfig.desc}
+                              </p>
+                            </div>
+
+                            {/* Action contextuelle */}
+                            <div className="flex items-center gap-2 self-start sm:self-center">
+                              {selectedOpp.workflowStep && selectedOpp.workflowStep < 9 && (
+                                <button
+                                  onClick={() => handleSelectStep(Math.min(9, (selectedOpp.workflowStep || 1) + 1))}
+                                  className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm shadow-rose-500/20"
+                                >
+                                  Passer à l'étape suivante (0{(selectedOpp.workflowStep || 1) + 1}) →
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Progress Bar 1 to 9 */}
+                          <div className="space-y-1.5 pt-1">
+                            <div className="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
+                              <div 
+                                className="h-full bg-gradient-to-r from-rose-500 to-amber-400 transition-all duration-300"
+                                style={{ width: `${((selectedOpp.workflowStep || 1) / 9) * 100}%` }}
+                              />
+                            </div>
+                          </div>
                         </div>
-                        <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
-                          <span>
-                            {
-                              [
-                                "Sauvegardée",
-                                "À préparer",
-                                "Candidature envoyée",
-                                "Relance",
-                                "Entretien",
-                                "Deuxième entretien",
-                                "Offre reçue",
-                                "Acceptée",
-                                "Refusée"
-                              ][(selectedOpp.workflowStep || 1) - 1]
-                            }
-                          </span>
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-1">
-                          {
-                            [
-                              "Offre repérée et mise de côté. Prépare tes arguments et analyse les besoins du recruteur.",
-                              "Dossier, CV et lettre de motivation en cours de rédaction et d'adaptation.",
-                              "Candidature transmise avec succès. En attente de premier accusé ou prise de contact.",
-                              "Délai d'attente optimal atteint. Prépare une relance soignée par téléphone ou email.",
-                              "Premier tour d'entretien planifié. Entraîne-toi sur tes motivations et ton parcours.",
-                              "Entretien approfondi ou test métier. Reste concentré sur la valeur que tu apportes.",
-                              "Félicitations ! L'entreprise t'a formulé une offre formelle d'embauche.",
-                              "Offre acceptée et signée. Prépare ton intégration future !",
-                              "Candidature archivée. Analyse les retours pour enrichir tes prochains entretiens."
-                            ][(selectedOpp.workflowStep || 1) - 1]
-                          }
-                        </p>
-                      </div>
 
-                      {/* Action contextuelle */}
-                      <div className="flex items-center gap-2 self-start sm:self-center">
-                        <button
-                          onClick={() => {
-                            const nextStep = Math.min(9, (selectedOpp.workflowStep || 1) + 1);
-                            const updated = { ...selectedOpp, workflowStep: nextStep };
-                            setSelectedOpp(updated);
-                            dbStore.updateOpportunity(updated);
-                            showToast(`Passage à l'étape ${nextStep}/9`, "success");
-                          }}
-                          className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm shadow-rose-500/20"
-                        >
-                          {
-                            [
-                              "Préparer ma candidature",
-                              "Marquer comme envoyée",
-                              "Programmer une relance",
-                              "Passer à l'entretien",
-                              "Valider le 1er entretien",
-                              "Enregistrer l'offre",
-                              "Accepter l'offre",
-                              "Candidature gagnée 🎉",
-                              "Étape finale"
-                            ][(selectedOpp.workflowStep || 1) - 1]
-                          }
-                        </button>
-                      </div>
-                    </div>
+                        {/* Pipeline de suivi (9 étapes complètes) */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                              <Layers className="w-4 h-4 text-rose-400" />
+                              Pipeline de suivi (9 étapes de candidature)
+                            </h4>
+                            <span className="text-[11px] text-slate-500">Clique sur une étape pour basculer la progression</span>
+                          </div>
 
-                    {/* Progress Bar 1 to 9 */}
-                    <div className="space-y-1.5 pt-1">
-                      <div className="h-2 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
-                        <div 
-                          className="h-full bg-gradient-to-r from-rose-500 to-amber-400 transition-all duration-300"
-                          style={{ width: `${((selectedOpp.workflowStep || 1) / 9) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            {workflowStepsList.map((item) => {
+                              const currentStep = selectedOpp.workflowStep || 1;
+                              const isCurrent = currentStep === item.step;
+                              const isPast = currentStep > item.step;
+                              const isFuture = currentStep < item.step;
 
-                  {/* Pipeline de suivi (9 étapes complètes) */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                        <Layers className="w-4 h-4 text-rose-400" />
-                        Pipeline de suivi (9 étapes)
-                      </h4>
-                      <span className="text-[11px] text-slate-500">Clique sur une étape pour changer manuellement</span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      {[
-                        { step: 1, name: "Sauvegardée", desc: "Offre mise de côté" },
-                        { step: 2, name: "À préparer", desc: "CV & lettre à rédiger" },
-                        { step: 3, name: "Candidature envoyée", desc: "Dossier soumis" },
-                        { step: 4, name: "Relance", desc: "Prise de contact" },
-                        { step: 5, name: "Entretien", desc: "1er échange RH / Visio" },
-                        { step: 6, name: "Deuxième entretien", desc: "Échange manager / Métier" },
-                        { step: 7, name: "Offre reçue", desc: "Proposition contractuelle" },
-                        { step: 8, name: "Acceptée", desc: "Contrat signé 🎉" },
-                        { step: 9, name: "Refusée", desc: "Non retenue / Archivée" }
-                      ].map((item) => {
-                        const currentStep = selectedOpp.workflowStep || 1;
-                        const isCurrent = currentStep === item.step;
-                        const isPast = currentStep > item.step;
-                        const isFuture = currentStep < item.step;
-
-                        return (
-                          <button
-                            key={item.step}
-                            onClick={() => {
-                              const updated = { ...selectedOpp, workflowStep: item.step };
-                              setSelectedOpp(updated);
-                              dbStore.updateOpportunity(updated);
-                              showToast(`Étape ajustée : ${item.name}`, "info");
-                            }}
-                            className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden ${
-                              isCurrent
-                                ? "bg-rose-500/15 border-rose-500/50 shadow-md shadow-rose-500/10 ring-1 ring-rose-500/30"
-                                : isPast
-                                ? "bg-emerald-500/5 border-emerald-500/20 text-slate-300 hover:bg-emerald-500/10"
-                                : "bg-white/[0.02] border-white/5 text-slate-400 hover:bg-white/5"
-                            }`}
-                          >
-                            <div className="flex items-center justify-between mb-1">
-                              <span className={`text-xs font-mono font-bold ${isCurrent ? "text-rose-400" : isPast ? "text-emerald-400" : "text-slate-500"}`}>
-                                0{item.step}
-                              </span>
-                              {isCurrent && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500 text-white uppercase tracking-wider">
-                                  En cours
-                                </span>
-                              )}
-                              {isPast && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300">
-                                  Validée
-                                </span>
-                              )}
-                              {isFuture && (
-                                <span className="text-[10px] text-slate-500 font-medium">
-                                  À venir
-                                </span>
-                              )}
-                            </div>
-                            <div className={`text-xs font-bold ${isCurrent ? "text-white" : "text-slate-200"}`}>
-                              {item.name}
-                            </div>
-                            <div className="text-[11px] text-slate-400 mt-0.5">
-                              {item.desc}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                              return (
+                                <button
+                                  key={item.step}
+                                  onClick={() => handleSelectStep(item.step)}
+                                  className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer relative overflow-hidden ${
+                                    isCurrent
+                                      ? "bg-rose-500/15 border-rose-500/50 shadow-md shadow-rose-500/10 ring-1 ring-rose-500/30"
+                                      : isPast
+                                      ? "bg-emerald-500/5 border-emerald-500/20 text-slate-300 hover:bg-emerald-500/10"
+                                      : "bg-white/[0.02] border-white/5 text-slate-400 hover:bg-white/5"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className={`text-xs font-mono font-bold ${isCurrent ? "text-rose-400" : isPast ? "text-emerald-400" : "text-slate-500"}`}>
+                                      0{item.step}
+                                    </span>
+                                    {isCurrent && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500 text-white uppercase tracking-wider">
+                                        En cours
+                                      </span>
+                                    )}
+                                    {isPast && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-300">
+                                        Validée
+                                      </span>
+                                    )}
+                                    {isFuture && (
+                                      <span className="text-[10px] text-slate-500 font-medium">
+                                        À venir
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className={`text-xs font-bold ${isCurrent ? "text-white" : "text-slate-200"}`}>
+                                    {item.name}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                    {item.desc}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 font-mono mt-1.5 pt-1 border-t border-white/5">
+                                    Catégorie : {item.category}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {/* Notes de workflow / Journal des échanges */}
                   <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
@@ -2223,14 +2697,31 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
               {activeTab === "reseau" && (
                 <div className="space-y-6">
                   {(() => {
-                    const oppRecruiterName = selectedOpp.recruiterContact?.name || "";
-                    const oppRecruiterRole = selectedOpp.recruiterContact?.role || "Responsable du Recrutement";
-                    const oppContact: Contact = {
+                    const allContacts = dbStore.getContacts();
+                    const recruiterId = selectedOpp.recruiterContact?.contactId || selectedOpp.recruiterContact?.id;
+                    let realContact = allContacts.find(c => c.id === recruiterId || c.opportunityId === selectedOpp.id);
+
+                    if (!realContact && selectedOpp.recruiterContact?.name) {
+                      const res = resolveContact({
+                        fullName: selectedOpp.recruiterContact.name,
+                        email: selectedOpp.recruiterContact.email,
+                        linkedInUrl: selectedOpp.recruiterContact.linkedinUrl || selectedOpp.recruiterContact.linkedin,
+                        companyName: selectedOpp.companyName
+                      }, allContacts);
+                      if (res.matchedContact) {
+                        realContact = res.matchedContact;
+                      }
+                    }
+
+                    const oppRecruiterName = selectedOpp.recruiterContact?.name || realContact?.fullName || "";
+                    const oppRecruiterRole = selectedOpp.recruiterContact?.role || realContact?.jobTitle || "Responsable du Recrutement";
+                    
+                    const oppContact: Contact = realContact || {
                       id: `opp_contact_${selectedOpp.id}`,
                       fullName: oppRecruiterName || `Recruteur ${selectedOpp.companyName}`,
                       firstName: oppRecruiterName ? oppRecruiterName.split(" ")[0] : "Responsable Recrutement",
                       lastName: oppRecruiterName ? oppRecruiterName.split(" ").slice(1).join(" ") : selectedOpp.companyName,
-                      companyId: "",
+                      companyId: selectedOpp.companyId || "",
                       companyName: selectedOpp.companyName,
                       jobTitle: oppRecruiterRole,
                       normalizedJobTitle: oppRecruiterRole,
@@ -2239,15 +2730,18 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                       connectionPoints: [`Offre ciblée : ${selectedOpp.title} (${selectedOpp.contractType})`],
                       previousCompanies: [],
                       email: selectedOpp.recruiterContact?.email,
+                      phone: selectedOpp.recruiterContact?.phone,
                       linkedInUrl: selectedOpp.recruiterContact?.linkedinUrl || selectedOpp.recruiterContact?.linkedin,
                       notes: `Opportunité : ${selectedOpp.title} chez ${selectedOpp.companyName} (${selectedOpp.contractType})`,
+                      opportunityId: selectedOpp.id,
                       opportunityTitle: selectedOpp.title,
                       createdAt: new Date().toISOString()
                     };
 
                     return (
                       <div className="space-y-4">
-                        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        {/* Synced Contact Card Banner */}
+                        <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
                               <Sparkles className="w-4 h-4 text-[#FF6685]" />
@@ -2256,16 +2750,27 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
                               </h4>
                             </div>
                             <p className="text-[11px] text-[#9AA0B2]">
-                              Génération contextuelle IA personnalisée selon votre profil, l'offre de {selectedOpp.companyName} et le destinataire.
+                              Génération contextuelle IA personnalisée selon votre profil, l'offre de {selectedOpp.companyName} et l'interlocuteur.
                             </p>
                           </div>
-                          
-                          {selectedOpp.recruiterContact?.name && (
-                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-[rgba(18,183,106,0.12)] text-[#34D399] border border-[rgba(18,183,106,0.25)] flex items-center gap-1.5 self-start sm:self-center">
-                              <UserCheck className="w-3 h-3 text-[#34D399]" />
-                              Contact RH : {selectedOpp.recruiterContact.name}
-                            </span>
-                          )}
+
+                          <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                            {realContact ? (
+                              <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-[rgba(18,183,106,0.14)] text-[#34D399] border border-[rgba(18,183,106,0.28)] flex items-center gap-1.5 shadow-[0_0_12px_rgba(18,183,106,0.15)]">
+                                <ShieldCheck className="w-3.5 h-3.5 text-[#34D399]" />
+                                Contact synchronisé dans l'annuaire
+                              </span>
+                            ) : selectedOpp.recruiterContact?.name ? (
+                              <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-500/15 text-purple-300 border border-purple-500/30 flex items-center gap-1.5">
+                                <UserCheck className="w-3.5 h-3.5 text-purple-400" />
+                                Contact RH : {selectedOpp.recruiterContact.name}
+                              </span>
+                            ) : (
+                              <span className="px-3 py-1.5 rounded-xl text-xs font-medium bg-white/5 text-[#9AA0B2] border border-white/10">
+                                Contact à préciser
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         <NetworkingMessageGenerator
@@ -2354,6 +2859,162 @@ export const Opportunities: React.FC<OpportunitiesProps> = ({ showToast, searchT
           }
         }}
       />
+
+      {/* Associate Existing Contact Modal */}
+      <Modal
+        isOpen={isAssociateModalOpen}
+        onClose={() => {
+          setIsAssociateModalOpen(false);
+          setAssociateSearch("");
+        }}
+        title={`Associer un contact existant à "${selectedOpp?.title || "l'opportunité"}"`}
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9AA0B2]" />
+            <input
+              type="text"
+              value={associateSearch}
+              onChange={(e) => setAssociateSearch(e.target.value)}
+              placeholder="Rechercher par nom, entreprise, rôle..."
+              className="w-full bg-black/30 border border-white/10 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-white/25"
+            />
+          </div>
+
+          <div className="max-h-[350px] overflow-y-auto space-y-2 pr-1 scrollbar-thin">
+            {(() => {
+              const allContacts = dbStore.getContacts();
+              const currentlyAssociatedIds = selectedOpp ? getOppAssociatedContacts(selectedOpp).map(c => c.id) : [];
+              const unassociated = allContacts.filter(c => !currentlyAssociatedIds.includes(c.id));
+              const filtered = unassociated.filter(c => {
+                if (!associateSearch.trim()) return true;
+                const query = associateSearch.toLowerCase();
+                return (
+                  c.fullName.toLowerCase().includes(query) ||
+                  c.companyName.toLowerCase().includes(query) ||
+                  c.jobTitle.toLowerCase().includes(query)
+                );
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="p-6 text-center text-xs text-slate-400 space-y-1">
+                    <Users className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                    <p className="font-semibold text-slate-300">Aucun contact disponible trouvé</p>
+                    <p className="text-[11px] text-slate-500">
+                      {associateSearch.trim() ? "Essayez une autre recherche." : "Tous vos contacts sont déjà associés ou vous n'avez pas encore de contact enregistré."}
+                    </p>
+                  </div>
+                );
+              }
+
+              return filtered.map(c => (
+                <div key={c.id} className="p-3 rounded-xl bg-white/[0.02] border border-white/10 hover:border-white/20 flex items-center justify-between gap-3 transition-colors">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">{c.fullName}</div>
+                    <div className="text-[11px] text-[#9AA0B2] truncate">{c.jobTitle} {c.companyName ? `• ${c.companyName}` : ''}</div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAssociateContact(c.id)}
+                    className="px-3 py-1.5 rounded-lg bg-[#D81A45]/20 hover:bg-[#D81A45]/30 text-xs text-[#FF6685] font-semibold border border-[#D81A45]/40 flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Associer</span>
+                  </button>
+                </div>
+              ));
+            })()}
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-white/5">
+            <GlassButton variant="ghost" size="sm" onClick={() => setIsAssociateModalOpen(false)}>
+              Fermer
+            </GlassButton>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Quick Create Contact Modal */}
+      <Modal
+        isOpen={isQuickAddModalOpen}
+        onClose={() => setIsQuickAddModalOpen(false)}
+        title={`Créer & associer un contact à "${selectedOpp?.title || "l'opportunité"}"`}
+        size="md"
+      >
+        <form onSubmit={handleQuickCreateContact} className="space-y-4">
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-slate-300 font-semibold mb-1 block">Nom complet *</label>
+              <input
+                type="text"
+                required
+                placeholder="Ex: Sophie Martin"
+                value={quickContactName}
+                onChange={(e) => setQuickContactName(e.target.value)}
+                className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/25"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold mb-1 block">Poste / Rôle</label>
+              <input
+                type="text"
+                placeholder="Ex: Responsable Recrutement RH"
+                value={quickContactRole}
+                onChange={(e) => setQuickContactRole(e.target.value)}
+                className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/25"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-300 font-semibold mb-1 block">E-mail</label>
+                <input
+                  type="email"
+                  placeholder="Ex: s.martin@entreprise.fr"
+                  value={quickContactEmail}
+                  onChange={(e) => setQuickContactEmail(e.target.value)}
+                  className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/25"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 font-semibold mb-1 block">Téléphone</label>
+                <input
+                  type="text"
+                  placeholder="Ex: 06 12 34 56 78"
+                  value={quickContactPhone}
+                  onChange={(e) => setQuickContactPhone(e.target.value)}
+                  className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/25"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-300 font-semibold mb-1 block">Profil LinkedIn</label>
+              <input
+                type="url"
+                placeholder="Ex: https://linkedin.com/in/..."
+                value={quickContactLinkedin}
+                onChange={(e) => setQuickContactLinkedin(e.target.value)}
+                className="w-full bg-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-white/25"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-white/5">
+            <GlassButton type="button" variant="ghost" size="sm" onClick={() => setIsQuickAddModalOpen(false)}>
+              Annuler
+            </GlassButton>
+            <GlassButton type="submit" variant="primary" size="sm">
+              Créer et associer
+            </GlassButton>
+          </div>
+        </form>
+      </Modal>
 
       {/* Delete Opportunity Confirmation Modal */}
       <Modal

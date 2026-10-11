@@ -442,6 +442,9 @@ function generateDeterministicAnalysisAndMessage(
         message = `Bonjour ${contactFirstName}, je m'intéresse de près aux enjeux de ${company} et à votre métier de ${job}. Au plaisir d'échanger dans notre réseau.`;
       }
     }
+    if (message.length > 295) {
+      message = message.substring(0, 292) + "...";
+    }
   }
 
   // B. MESSAGE APRÈS ACCEPTATION

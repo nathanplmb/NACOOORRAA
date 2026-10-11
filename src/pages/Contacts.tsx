@@ -11,6 +11,7 @@ import { ContactDetailWorkspace } from "../components/ContactDetailWorkspace";
 import { computeStrategicInterests } from "../utils/strategicInterests";
 import { classifyContactFunction, STANDARD_CONTACT_FUNCTIONS } from "../utils/contactTaxonomy";
 import { resolveCompany } from "../utils/companyResolver";
+import { hasRealConversation } from "../utils/contactResolver";
 import { 
   Users, 
   Search, 
@@ -98,13 +99,15 @@ interface ContactsProps {
   searchTerm: string;
   initialSelectedContactId?: string | null;
   onClearInitialContact?: () => void;
+  onStartConversation?: (contactId: string) => void;
 }
 
 export const Contacts: React.FC<ContactsProps> = ({ 
   showToast, 
   searchTerm, 
   initialSelectedContactId, 
-  onClearInitialContact 
+  onClearInitialContact,
+  onStartConversation
 }) => {
   const { language, t } = useLanguage();
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -789,6 +792,7 @@ export const Contacts: React.FC<ContactsProps> = ({
           }}
           onDelete={handleDeleteContact}
           showToast={showToast}
+          onStartConversation={onStartConversation}
         />
       </div>
     );
@@ -1599,7 +1603,25 @@ export const Contacts: React.FC<ContactsProps> = ({
                     </div>
 
                     {/* Row Context Menu / Actions */}
-                    <div className="w-auto md:w-16 flex items-center justify-end gap-1 relative" onClick={(e) => e.stopPropagation()}>
+                    <div className="w-auto md:w-20 flex items-center justify-end gap-1 relative" onClick={(e) => e.stopPropagation()}>
+                      {onStartConversation && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onStartConversation(contact.id);
+                          }}
+                          className={`p-1.5 rounded-lg transition-colors ${
+                            hasRealConversation(contact)
+                              ? "text-[#FF6685] hover:bg-white/10"
+                              : "text-[#9AA0B2] hover:text-[#FF6685] hover:bg-white/10"
+                          }`}
+                          title={hasRealConversation(contact) ? "Ouvrir l'échange dans Networking" : "Démarrer une conversation dans Networking"}
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={(e) => {

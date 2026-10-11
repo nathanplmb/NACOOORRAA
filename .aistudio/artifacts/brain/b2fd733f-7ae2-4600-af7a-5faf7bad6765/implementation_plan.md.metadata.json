@@ -1,0 +1,6 @@
+{
+  "summary":  "Plan complet d'audit, de correction de la fuite de données inter-comptes (pollution croisée), d'isolation stricte par UID Firebase, de refonte du cycle de vie de session et de verrouillage des règles de sécurité Firestore.",
+  "updatedAt":  "2026-10-10T11:33:56.863223982Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

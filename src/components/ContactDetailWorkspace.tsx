@@ -15,6 +15,7 @@ import {
 } from "../utils/strategicInterests";
 import { STANDARD_CONTACT_FUNCTIONS, classifyContactFunction } from "../utils/contactTaxonomy";
 import { resolveCompany } from "../utils/companyResolver";
+import { hasRealConversation } from "../utils/contactResolver";
 import { GlassButton, Modal } from "./Shared";
 import { NetworkingMessageGenerator } from "./network/NetworkingMessageGenerator";
 import { 
@@ -64,6 +65,7 @@ interface ContactDetailWorkspaceProps {
   onUpdate: (updatedContact: Contact) => void;
   onDelete: (contactId: string) => void;
   showToast: (message: string, type: "success" | "error" | "info" | "ai") => void;
+  onStartConversation?: (contactId: string) => void;
 }
 
 export type ContactWorkspaceTab = "overview" | "networking" | "strategy" | "notes_history";
@@ -74,7 +76,8 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
   onClose,
   onUpdate,
   onDelete,
-  showToast
+  showToast,
+  onStartConversation
 }) => {
   // Navigation state (4 distinct spaces)
   const [activeTab, setActiveTab] = useState<ContactWorkspaceTab>("overview");
@@ -945,14 +948,28 @@ export const ContactDetailWorkspace: React.FC<ContactDetailWorkspaceProps> = ({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
+              <div className="flex items-center gap-2 pt-1 flex-wrap">
                 <button
                   onClick={() => setActiveTab("networking")}
-                  className="flex-1 px-3 py-2 rounded-xl bg-[#D81A45] hover:bg-[#FF6685] text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                  className="flex-1 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-[#F5F6FA] text-xs font-semibold border border-white/10 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>{contact.aiCustomMessage ? "Voir le message" : "Préparer le message"}</span>
+                  <Sparkles className="w-3.5 h-3.5 text-[#C084FC]" />
+                  <span>{contact.aiCustomMessage ? "Voir le message" : "Préparer un message"}</span>
                 </button>
+
+                {onStartConversation && (
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onStartConversation(contact.id);
+                    }}
+                    className="flex-1 px-3 py-2 rounded-xl bg-[#D81A45] hover:bg-[#FF6685] text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+                    title={hasRealConversation(contact) ? "Ouvrir l'échange existant dans Networking" : "Initialiser un échange dans Networking"}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>{hasRealConversation(contact) ? "Ouvrir dans Networking" : "Démarrer une conversation"}</span>
+                  </button>
+                )}
 
                 {nextActionDetails.hasDate && (
                   <button
